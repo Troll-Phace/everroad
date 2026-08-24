@@ -1,12 +1,28 @@
 import { describe, it, expect } from 'vitest';
-import { BIOMES, BIOME_LEN, BLEND_LEN, biomeAt, blendNumber, sForBiome } from './biomes';
+import {
+  BIOMES,
+  BIOME_LEN,
+  BLEND_LEN,
+  biomeAt,
+  blendNumber,
+  createBiomeSample,
+  sForBiome,
+} from './biomes';
 import { BIOME_ORDER } from '../types';
+
+/**
+ * `biomeAt` requires the caller to own its scratch. `scratch` is for reads that
+ * finish before the next call; `other` exists so the two-call comparisons below
+ * cannot silently compare a sample against itself.
+ */
+const scratch = createBiomeSample();
+const other = createBiomeSample();
 
 describe('blendNumber', () => {
   it('matches the weighted average of the boundary biomes mid-blend', () => {
     // autumn (index 3) -> pine boundary: the largest mist gap (1.15 -> 1.6).
     const s = 4 * BIOME_LEN - BLEND_LEN / 2;
-    const sample = biomeAt(s);
+    const sample = biomeAt(s, scratch);
     expect(sample.blend).toBeGreaterThan(0);
     const expected = BIOMES.autumn.mist * (1 - sample.blend) + BIOMES.pine.mist * sample.blend;
     expect(blendNumber(s, (b) => b.mist)).toBeCloseTo(expected, 12);
@@ -17,13 +33,13 @@ describe('blendNumber', () => {
     const segStart = 3 * BIOME_LEN;
     let sFlip = 0;
     for (let s = segStart + BIOME_LEN - BLEND_LEN; s < segStart + BIOME_LEN; s += 0.25) {
-      if (biomeAt(s).blend > 0.5) {
+      if (biomeAt(s, scratch).blend > 0.5) {
         sFlip = s;
         break;
       }
     }
     expect(sFlip).toBeGreaterThan(0);
-    expect(biomeAt(sFlip).id).not.toBe(biomeAt(sFlip - 0.5).id); // the id does flip here
+    expect(biomeAt(sFlip, scratch).id).not.toBe(biomeAt(sFlip - 0.5, other).id); // the id does flip here
     const before = blendNumber(sFlip - 0.5, (b) => b.mist);
     const after = blendNumber(sFlip + 0.5, (b) => b.mist);
     expect(Math.abs(after - before)).toBeLessThan(0.01);
@@ -51,18 +67,18 @@ describe('sForBiome', () => {
 
   it.each(BIOME_ORDER)('round-trips %s through biomeAt at every frac', (id) => {
     for (const frac of FRACS) {
-      expect(biomeAt(sForBiome(id, frac)).id).toBe(id);
+      expect(biomeAt(sForBiome(id, frac), scratch).id).toBe(id);
     }
   });
 
   it('defaults to a frac that lands inside the biome', () => {
-    for (const id of BIOME_ORDER) expect(biomeAt(sForBiome(id)).id).toBe(id);
+    for (const id of BIOME_ORDER) expect(biomeAt(sForBiome(id), scratch).id).toBe(id);
   });
 
   it('sits clear of the crossfade for fracs in 0.15..0.7', () => {
     for (const id of BIOME_ORDER) {
       for (let frac = 0.15; frac <= 0.7001; frac += 0.05) {
-        const sample = biomeAt(sForBiome(id, frac));
+        const sample = biomeAt(sForBiome(id, frac), scratch);
         // Not blending into the next biome...
         expect(sample.blend).toBe(0);
         // ...and comfortably past the crossfade that ends at the segment start.
@@ -88,8 +104,8 @@ describe('sForBiome', () => {
 
   it('clamps an out-of-range frac rather than spilling into a neighbour', () => {
     for (const id of BIOME_ORDER) {
-      expect(biomeAt(sForBiome(id, -3)).id).toBe(id);
-      expect(biomeAt(sForBiome(id, 42)).id).toBe(id);
+      expect(biomeAt(sForBiome(id, -3), scratch).id).toBe(id);
+      expect(biomeAt(sForBiome(id, 42), scratch).id).toBe(id);
     }
   });
 });

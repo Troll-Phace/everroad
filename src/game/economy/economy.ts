@@ -392,6 +392,13 @@ export function getPrestigePreview(state: GameState): PrestigePreview {
   if (canPrestige) {
     const tokenMagnet = globalLevel(state, 'token-magnet');
     const base = Math.pow(state.stats.journeyMiles / PRESTIGE_BASE_MILES, PRESTIGE_TOKEN_EXPONENT);
+    // The floor is unreachable at today's tuning — `canPrestige` implies
+    // journeyMiles >= PRESTIGE_BASE_MILES * PRESTIGE_MILES_GROWTH^count, so
+    // `base` is already >= 1 — and it is kept deliberately (issue #25). It is
+    // the rule the design wants rather than an arithmetic accident: a prestige
+    // the player has *earned* never pays zero tokens. The numbers it depends on
+    // live in docs/ECONOMY.md and are meant to be retuned; a growth or exponent
+    // change is where this stops being dead.
     tokensOnPrestige = Math.max(1, Math.floor(base * (1 + tokenMagnet * TOKEN_MAGNET_PER_LEVEL)));
   }
   return { tokensOnPrestige, milesRequired, canPrestige };
@@ -431,6 +438,10 @@ export function doPrestige(state: GameState): number {
  */
 export function getPickupCoinValue(state: GameState, combo: number): number {
   const coinsPerSec = (getCarSpeed(state) / 3600) * getCoinRatePerMile(state, NEUTRAL_CTX);
+  // Same call as the prestige floor above (issue #25): unreachable today,
+  // because `Math.ceil` of a positive is already >= 1, and kept anyway. A coin
+  // the player drove over and collected must be worth at least one coin; the
+  // clamp is what makes that true if a rate ever rounds to zero.
   return Math.max(1, Math.ceil(coinsPerSec * PICKUP_VALUE_SECONDS * Math.max(1, combo)));
 }
 

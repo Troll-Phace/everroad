@@ -145,10 +145,13 @@ export class Weather {
     (this.leaves.material as THREE.MeshBasicMaterial).opacity = leafI * 0.92;
     this.leaves.visible = leafI > 0.01;
     if (this.leaves.visible) {
-      const m = new THREE.Matrix4();
-      const q = new THREE.Quaternion();
-      const e = new THREE.Euler();
-      const v = new THREE.Vector3();
+      // Module-level scratch: this runs every frame a leaf episode is up, and
+      // the frame budget is zero steady-state allocation (§14). Nothing
+      // escapes — `m` is copied into the instance matrix each iteration.
+      const m = tmpMatrix;
+      const q = tmpQuat;
+      const e = tmpEuler;
+      const v = tmpPos;
       for (let i = 0; i < this.leafState.length; i++) {
         const L = this.leafState[i];
         L.y -= (0.9 + Math.sin(L.phase) * 0.3) * dt;
@@ -166,6 +169,27 @@ export class Weather {
       }
       this.leaves.instanceMatrix.needsUpdate = true;
     }
+  }
+
+  /**
+   * Cut to a fresh episode drawn for `biomeId`/`phase`, with no crossfade.
+   *
+   * Attract mode re-seeds the whole scene on every menu entry — new car, new
+   * biome, new light — and the weather has to be re-drawn with it, or an
+   * episode outlives the scene that justified it: leaves kept falling over
+   * pines and marshes because they were retinted per biome but never
+   * re-rolled (issue #43). The draw goes through the same `pick` the episode
+   * machine uses, so the new episode is one the freshly-chosen biome and time
+   * of day actually support. `previous` is set to the new episode and the fade
+   * completed, because a scene cut has nothing to fade from.
+   */
+  reseed(biomeId: BiomeId, phase: TimePhase): void {
+    const next = this.pick(biomeId, phase);
+    this.previous = next;
+    this.current = next;
+    this.fade = 1;
+    this.episodeLeft = 55 + Math.random() * 95;
+    this.bus.emit('weatherChange', { id: next });
   }
 
   /** Re-tint leaves for the current biome (call on biome change). */
@@ -204,3 +228,7 @@ export class Weather {
 }
 
 const ONE = new THREE.Vector3(1, 1, 1);
+const tmpMatrix = new THREE.Matrix4();
+const tmpQuat = new THREE.Quaternion();
+const tmpEuler = new THREE.Euler();
+const tmpPos = new THREE.Vector3();

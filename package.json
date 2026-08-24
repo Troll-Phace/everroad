@@ -2,6 +2,7 @@
   "name": "everroad",
   "private": true,
   "version": "0.1.18",
+  "license": "MIT",
   "type": "module",
   "main": "electron/main.cjs",
   "author": "Troll-Phace (https://github.com/Troll-Phace)",

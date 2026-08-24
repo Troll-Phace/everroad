@@ -2,7 +2,15 @@ import * as THREE from 'three';
 import './style.css';
 import { createEventBus } from './events';
 import { defaultState, defaultRuntime, newJourneyState } from './state';
-import type { BiomeId, EconomyContext, GameState, SaveSummary, UIActions, UIDeps } from './types';
+import type {
+  BiomeId,
+  EconomyContext,
+  GameState,
+  SaveSummary,
+  SaveWriteResult,
+  UIActions,
+  UIDeps,
+} from './types';
 import { BIOME_NAMES, BIOME_ORDER } from './types';
 import { Input } from './engine/input';
 import { DayNight } from './engine/daynight';
@@ -17,7 +25,14 @@ import { Weather } from './world/weather';
 import { Pickups } from './world/pickups';
 import { PostFX } from './world/postfx';
 import { SunShadow } from './world/sunShadow';
-import { BIOMES, biomeAt, blendColor, blendNumber, sForBiome } from './world/biomes';
+import {
+  BIOMES,
+  biomeAt,
+  blendColor,
+  blendNumber,
+  createBiomeSample,
+  sForBiome,
+} from './world/biomes';
 import * as economy from './game/economy/economy';
 import { CARS, getCarDef } from './game/economy/cars';
 import { UPGRADES, GLOBAL_UPGRADES } from './game/economy/upgrades';
@@ -45,6 +60,47 @@ const runtime = defaultRuntime();
 // measuring to the menu-entry instant yields the true away time at boot and
 // zero after a quit.
 
+/** What the player is told about each kind of refused write. */
+const SAVE_REFUSAL_TEXT: Record<Exclude<SaveWriteResult, 'ok'>, string> = {
+  conflict: 'Another tab saved newer progress — this tab has stopped saving. Reload to catch up.',
+  locked: 'A save from a newer version is in the way — this tab will not save over it.',
+  error: 'Storage is full or blocked — your progress is not being saved.',
+};
+
+/**
+ * A refused write waiting to be shown, and whether one already has been. The
+ * two are kept apart on purpose: raising the toast in the same breath as the
+ * refusal would latch "already warned" even when nothing reached the player —
+ * `gameToast` drops anything raised outside `playing`, and the write on
+ * `visibilitychange` happens as the tab goes away, where a 4.5s toast expires
+ * unseen. The frame loop flushes it at a moment the player is actually there.
+ */
+let saveRefusalPending: Exclude<SaveWriteResult, 'ok'> | null = null;
+let saveRefusalWarned = false;
+
+/**
+ * Every write to the save goes through here. `saveGame` can refuse — another
+ * tab has saved since this one loaded, or this session may not write over a
+ * newer-build save it could not back up (docs/ARCHITECTURE.md §12) — and it can
+ * simply fail on full or blocked storage. All three mean the player is no
+ * longer being saved, so all three queue the warning; the result is returned
+ * for callers that need to act on it rather than merely report it.
+ */
+function persist(target: GameState = state): SaveWriteResult {
+  const result = save.saveGame(target);
+  if (result !== 'ok' && !saveRefusalWarned && !saveRefusalPending) saveRefusalPending = result;
+  return result;
+}
+
+/** Raise the queued save warning, once, when the player can see it. */
+function flushSaveRefusal(): void {
+  if (!saveRefusalPending || runtime.appMode !== 'playing' || document.hidden) return;
+  const result = saveRefusalPending;
+  saveRefusalPending = null;
+  saveRefusalWarned = true;
+  bus.emit('toast', { text: SAVE_REFUSAL_TEXT[result], icon: '⚠️' });
+}
+
 // ---------------------------------------------------------------------------
 // Renderer & scene
 // ---------------------------------------------------------------------------
@@ -60,7 +116,11 @@ renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.12;
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// PCF, not PCFSoft: three r185 deprecated PCFSoftShadowMap and silently swaps
+// it for PCFShadowMap on the first shadow render, warning once per boot. The
+// game has therefore been rendering PCF shadows all along, so naming it here
+// changes the console, not a pixel. src/tools/modelViewer.ts mirrors this.
+renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
 scene.fog = new THREE.FogExp2('#d2ecd2', 0.0045);
@@ -193,15 +253,19 @@ const actions: UIActions = {
     const tokens = economy.doPrestige(state);
     bus.emit('prestige', { tokensGained: tokens });
     audio.onPrestige();
-    save.saveGame(state);
+    persist();
     return true;
   },
   exportSave: () => save.exportSave(state),
   importSave(code) {
     const imported = save.importSave(code);
     if (!imported) return false;
+    // Sanitised, then written, and only adopted if the write landed: a refused
+    // write must not leave the game running a journey that was never
+    // persisted. The panel shows its inline error on `false`.
+    economy.initEconomy(imported);
+    if (persist(imported) !== 'ok') return false;
     replaceState(imported);
-    save.saveGame(state);
     bus.emit('toast', { text: 'Save imported', icon: '💾' });
     return true;
   },
@@ -327,6 +391,15 @@ function randomMenuTimeOfDay(): number {
 const RESEED_MARGIN = (BEHIND + 2) * CHUNK_LEN;
 
 /**
+ * This module's own `biomeAt` out-param (docs/ARCHITECTURE.md §14). `biomeAt`
+ * writes into a shared scratch by default, and `blendColor`/`blendNumber` call
+ * it several times further down the same frame — owning the sample here is
+ * what keeps those calls from rewriting a result this file is still reading.
+ * `seedWorldAt` and the frame loop never interleave, so one sample serves both.
+ */
+const worldBiome = createBiomeSample();
+
+/**
  * Re-seed every world system for a teleport along the road. The path is
  * re-anchored at `s` (see RoadPath.reset for why a backwards jump needs it),
  * so chunks and pickups — both keyed to absolute positions — are dropped in
@@ -340,12 +413,12 @@ function seedWorldAt(s: number): void {
   pickups.reset(s);
   chunks.update(vehicle.s);
 
-  const biome = biomeAt(vehicle.s);
+  const biome = biomeAt(vehicle.s, worldBiome);
   runtime.biomeId = biome.id;
   runtime.nextBiomeId = biome.next;
   runtime.biomeBlend = biome.blend;
-  weather.retintLeaves(biome.id);
-  applyAccent(biome.id);
+  weather.retintLeaves(runtime.biomeId);
+  applyAccent(runtime.biomeId);
 
   runtime.speedMph = vehicle.speedMph;
   runtime.isActive = false;
@@ -392,6 +465,12 @@ function enterMenu(): void {
   const snap = daynight.update(0);
   runtime.timeOfDay = daynight.timeOfDay;
   runtime.timePhase = snap.phase;
+
+  // Weather is re-drawn with the rest of the scene, after the biome and the
+  // light are settled so the draw can see both — otherwise the episode that
+  // was running carries over and leaves fall over pines (issue #43).
+  weather.reseed(runtime.biomeId, runtime.timePhase);
+  runtime.weatherId = weather.current;
 
   menuCam.reset();
   menuCam.update(vehicle, 0);
@@ -447,16 +526,21 @@ function startGame(kind: 'continue' | 'new'): void {
     // audio and graphics preferences (that is what "Erase EVERYTHING" is for).
     // Routed through replaceState so the preserved quality and audio values
     // reach the systems that otherwise only read them at boot.
+    // replaceState also applies the new journey's car style, which is the rig
+    // build for this path — a second setStyle here would build it twice
+    // (issue #44), so the style is only re-applied on the branch that needs it.
     replaceState(newJourneyState(state.settings));
     // defaultStats seeds sessionCount 0; a brand-new journey is session 1.
     state.stats.sessionCount = 1;
   } else {
     // A returning save lands on 2+ here and earns "Welcome Back".
     state.stats.sessionCount += 1;
+    // Continue hydrates state without going through replaceState, so nothing
+    // has told the rig which car it is: the menu left the showreel car on it.
+    vehicle.setStyle(getCarDef(state.currentCarId).style);
     grantOfflineProgress();
   }
 
-  vehicle.setStyle(getCarDef(state.currentCarId).style);
   seedWorldAt(START_S);
   // Cut, don't swoop: without this the chase rig would lerp in from wherever
   // the cinematic camera happened to be parked.
@@ -472,7 +556,7 @@ function startGame(kind: 'continue' | 'new'): void {
 
 /** Save, then drop back to a freshly-randomised attract scene. */
 function quitToMenu(): void {
-  save.saveGame(state);
+  persist();
   enterMenu();
 }
 
@@ -566,15 +650,17 @@ function frame(now: number): void {
     state.stats.bestCombo = Math.max(state.stats.bestCombo, runtime.combo);
   }
 
-  // Biome bookkeeping
-  const biome = biomeAt(vehicle.s);
+  // Biome bookkeeping. Read out of the sample immediately: everything below
+  // this block may sample biomes again through blendColor/blendNumber.
+  const biome = biomeAt(vehicle.s, worldBiome);
   runtime.nextBiomeId = biome.next;
   runtime.biomeBlend = biome.blend;
-  if (biome.id !== runtime.biomeId) {
-    runtime.biomeId = biome.id;
-    weather.retintLeaves(biome.id);
-    applyAccent(biome.id);
-    bus.emit('biomeChange', { id: biome.id, name: BIOME_NAMES[biome.id] });
+  const biomeId = biome.id;
+  if (biomeId !== runtime.biomeId) {
+    runtime.biomeId = biomeId;
+    weather.retintLeaves(biomeId);
+    applyAccent(biomeId);
+    bus.emit('biomeChange', { id: biomeId, name: BIOME_NAMES[biomeId] });
   }
 
   // ---- camera ----
@@ -677,9 +763,10 @@ function frame(now: number): void {
     saveTimer += dt;
     if (saveTimer > 5) {
       saveTimer = 0;
-      save.saveGame(state);
+      persist();
     }
   }
+  flushSaveRefusal();
 
   postfx.render(dt);
 
@@ -740,8 +827,8 @@ if (import.meta.env.DEV) {
 // Same reason as the autosave timer: a save written from the menu would stamp
 // lastSaveTime and swallow the player's uncollected offline progress.
 window.addEventListener('beforeunload', () => {
-  if (runtime.appMode === 'playing') save.saveGame(state);
+  if (runtime.appMode === 'playing') persist();
 });
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && runtime.appMode === 'playing') save.saveGame(state);
+  if (document.hidden && runtime.appMode === 'playing') persist();
 });

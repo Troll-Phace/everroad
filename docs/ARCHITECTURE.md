@@ -509,48 +509,74 @@ rather than affine across a cell, which is exact near the road but drifts to
 ~28 cm past 120 m. Grounding scenery to the field instead of the mesh was the
 "floating trees" bug.
 
-The far field folds. `RoadPath.curvature` is a closed-form sum of four sines,
-so the radius is exactly `1 / |κ(s)|` and the tightest possible bend is the
-analytic bound `1 / (0.0042 + 0.0035 + 0.0028 + 0.0009)` = **87.7 m** — well
-inside the ±165 m `TER_COLS` reaches, so `1 - κ·lat` goes negative and the
-lateral mapping inverts. A cell folds exactly when `|lat| >= R`.
+The far field used to fold, and the shape of that defect is worth keeping
+because the fix is a constraint every future change to the ribbon inherits.
 
-Rates depend on which measure you use, so name it. Counting **terrain cells**
-— a cell folds when the outer of its two `TER_COLS` columns exceeds R, which is
-what actually crumples — over the first 102 km: **0% inside |lat| 90, 3.96% at
-90-120, 17.15% at 120-165**. Measured instead as the fraction of continuous
-lateral extent with `|lat| >= R`, the same road gives 0% / 2.1% / 11.3%; both
-are defensible, they are not the same number, and a reader who applies the
-`|lat| >= R` rule to a figure computed the other way will not reproduce it.
-
-Either way the global average badly understates the places it matters. At the
-tightest bend in the first 102 km (**s = 99129, R = 91.3 m**) the local
-cell rates are **0% inside 90, but 100% at 90-120 and 100% beyond 120** — the
-entire outer field is inverted. **63** of 1700 chunks over 102 km are tighter
-than R 110. Quote the local figures, not the global ones, and derive them: the
-curvature is closed-form, so any of these numbers can be recomputed exactly
-rather than sampled.
+`RoadPath.curvature` is a closed-form sum of four sines, so the radius at any
+`s` is exactly `1 / |κ(s)|` and the tightest bend the generator can produce is
+the analytic bound `1 / (0.0042 + 0.0035 + 0.0028 + 0.0009)` = **87.7 m** — far
+inside the ±165 m `TER_COLS` reaches. The parallel-offset map `P(s) + N(s)·lat`
+stretches by `1 + κ·lat` per metre of `s`, so on the inside of a bend it
+collapses to a point at `lat = -R` and turns inside out past it: a cell folded
+exactly when `|lat| >= R`, and up to **19 terrain triangles** covered a single
+XZ point.
 
 A caution learned the hard way: s ≈ 24.6 km is a nearly *straight* stretch
 (R = 1928 m, zero folded cells) and has twice been mistaken for a tight bend in
 this project's measurements. Check `1 / |κ(s)|` before calling any location
-tight.
+tight, and derive these numbers rather than sampling them — the closed form
+makes exact answers cheap. The genuinely tight bends on the shipping seed
+(20260824) are **s = 21123 (R 92.4)**, **s = 99129 (R 91.3)** and
+**s = 431619 (R 88.7)**.
 
-Where the ribbon folds it also stacks: up to **19 terrain triangles cover a
-single XZ point**. `sampleTerrainMesh` grounds a prop to its own flap correctly
-— the sampler is not at fault, and replacing its parametric fallback with a
-nearest-triangle clamp returns byte-identical results — but a *different* flap
-may be drawn above it, so the prop can be buried or left hanging. On the 12
-tightest chunks, 4.10% of samples in the |lat| 90-120 band are more than 0.25 m
-off the topmost drawn surface, worst case 2.80 m. Every other band at every
-other curvature is exactly 0. `sampleTerrainMesh` also flags folded samples
-`folded` so callers decline to lean props along a mirrored normal. All of this
-is mitigation: the crumpled geometry is a real defect, tracked separately.
+The fix is `foldSafeLateral` in `roadPath.ts`, applied by `RoadPath.point` and
+exposed as `RoadPath.effectiveLateral`. Below `FOLD_START = 0.6` of the local
+radius it is the identity — which covers the road, the car, every pickup and
+the near field at every curvature the generator can produce, so nothing near
+the road moved — and past it the columns compress smoothly onto an asymptote at
+`FOLD_LIMIT = 0.85` of the radius, C1 at the handover and monotone in `lat`.
+The stretch factor therefore never drops below `1 - FOLD_LIMIT`, so no cell can
+invert at any curvature.
 
-The ribbon cannot simply be widened to cover more ground — `TER_COLS` at ±420
-folds catastrophically, a flat plane over the lower half of the frame, because
-the lateral extent needed far exceeds the minimum turn radius. Anything that
-must fill beyond the ribbon belongs in world space, not path space.
+Rates depend on which measure you use, so name it. Counting **terrain cells** —
+a cell folds when either of its triangles winds backwards in XZ, which is what
+actually crumples — over the first 102 km of the shipping seed, before and
+after:
+
+| band | before | after |
+|---|---|---|
+| \|lat\| 0-90 | 0% | 0% |
+| \|lat\| 90-120 | 1.99% | **0%** |
+| \|lat\| 120-165 | 8.58% | **0%** |
+
+The global average badly understated the places it mattered: at each of the
+three tight bends above, **50% of all cells** past |lat| 90 folded — which is
+*every* cell on the inside of the bend, the outer half never folding. Samples
+landing inside neither triangle of their own cell went from 17 in 335,070
+(nearest at |lat| 95) to **zero**. Prop bases, measured against the terrain
+geometry the ChunkManager actually hands three.js at those three bends, went
+from up to **16.7 m** off the topmost drawn surface to **0.000 m** — every prop
+now sits on the triangle the renderer draws.
+
+Note what the compression means, because it is a real trade and not a free win.
+The ground on the inside of a bend is not 165 m of ground; it is a disc of
+radius R, and any map that claims otherwise covers the same dirt twice. So at
+the tightest bends the ribbon's inner edge now reaches ~75 m rather than 165 m,
+and the outermost column band collapses to a sliver there. That is the ribbon
+telling the truth about how much inside-of-bend ground exists. It also means
+the ribbon *narrows* on the inside of tight bends, and `world/farLand.ts` is
+what stands behind it — the measured ribbon-edge silhouette at the three bends
+dropped (19.2°/13.6°/4.3° to 10.2°/6.8°/3.4°), so the fan covers more of the
+gap than it did, not less.
+
+Heights and terrain colour both key off `effectiveLateral`, not the raw column
+value: a column that landed at 80 m has to carry the land of 80 m out, not the
+165 m far-field rise, or the ribbon grows a wall at its own edge.
+
+The ribbon still cannot simply be widened to cover more ground — `TER_COLS` at
+±420 folds catastrophically even now, because the compression would flatten
+almost all of it into a sliver. Anything that must fill beyond the ribbon
+belongs in world space, not path space.
 
 The ribbon also simply *ends* at ±165 m, and a near-horizontal sight line runs
 out over the fields, leaves it a metre or two above the surface and finds
@@ -567,10 +593,12 @@ the whole golden hour. That asymmetry between quality tiers is exactly the
 kind of bug a mid-quality playtest cannot see.
 
 Its elevation rises monotonically with radius, from 10° below the eye at
-120 m — inside the ribbon on every side, so real terrain always buries the
-inner rim — to a ridge that is a **floor of 7.6° with the wander folded
-upward**, occupying [7.6°, 9.0°] and never dipping below the floor at any
-azimuth. That one-sidedness is the guarantee and must not be "simplified"
+120 m — well below ground level, so real terrain buries the inner rim wherever
+the ribbon still reaches that far; on the inside of the tightest bends the
+compressed ribbon stops nearer than 120 m and the fan simply shows through
+under the horizon, which is what it is for — to a ridge that is a **floor of
+7.6° with the wander folded upward**, occupying [7.6°, 9.0°] and never dipping
+below the floor at any azimuth. That one-sidedness is the guarantee and must not be "simplified"
 into a symmetric ±wander: the fan closes every gap below its silhouette and
 none above, so a symmetric wander dips below the floor on part of the circle
 and closure becomes a coincidence of azimuth. The floor is set by curvature —
@@ -579,8 +607,11 @@ its silhouette. On a straight the land silhouette tops out near 5.5°; at the
 road's tightest bends (R 92.4 at s ~21.1 km, R 91.3 at s ~99.1 km, R 88.7 at
 s ~431.6 km) it reaches 6.64°. Enclosed-sky pixels on a 1280x800 mask go from
 200 to 0 at the sunflower-coast repro and from 3500-6500 to 0, terrain-only,
-at those bends. The residual at folded bends is sky beneath *airborne
-scenery*, which no horizon height can close — see §5.3's fold note.
+at those bends. The residual those measurements left — sky beneath scenery
+standing on a folded flap — went with the fold itself; the ribbon-edge
+silhouette at all three bends is lower now than when these figures were taken,
+so the fan has more margin, not less. Worth re-measuring on a playtest all the
+same.
 
 Dash bleed at chunk seams and terrain winding after an axis flip have both been
 bugs here (commits `2a3856d`, `ebbdbe9`). New geometry work in this file should
@@ -589,8 +620,14 @@ be checked at a seam, not mid-chunk.
 ### 5.4 Biomes (`biomes.ts`)
 
 Eight biomes cycle in a fixed rotation with `BIOME_LEN = 2700` m per segment and
-`BLEND_LEN = 520` m crossfade zones. `biomeAt(s)` returns a `BiomeSample`
-(`{ id, nextId, blend }`), and every visual system samples that same function:
+`BLEND_LEN = 520` m crossfade zones. `biomeAt(s, out?)` returns a `BiomeSample`
+(`{ id, next, blend, weights }`), and every visual system samples that same
+function. It is called several times a frame, so it writes into `out` rather
+than allocating; `out` defaults to a module-level scratch, which makes
+`biomeAt(s).id` safe and holding the returned object across another call
+unsafe. A caller that keeps a sample owns one from `createBiomeSample()` —
+`main.ts` does, because `blendColor`/`blendNumber` sample again later in the
+same frame (§14's zero steady-state allocation budget is what forces the shape):
 
 | Id | Name | Palette | Signature |
 |----|------|---------|-----------|
@@ -668,7 +705,9 @@ with it. `SLOPE_FOLLOW` is how far each kind leans toward the face it stands
 on — 1.0 for things that lie on the ground (grass tufts, rocks), tapering to
 0.1–0.2 for trees and the windmill, which grew or were built vertical and only
 pick up a hint of the lean. `MAX_TILT = 0.5` rad (~29°) caps the lean; real
-land tops out near 26°, so the cap only bites in the folded far field. The sink
+land tops out near 26°, so the cap is the floor under the steepest cell the
+height field can make rather than something the far field routinely hits. The
+sink
 is interpolated by the same follow value, `SINK_FLUSH = 0.03` m to
 `SINK_UPRIGHT = 0.14` m: a prop lying flush with the face needs a sliver to
 kill the seam, while one kept deliberately vertical on a slope must bury its
@@ -1106,7 +1145,35 @@ Implementation: `src/save/save.ts`.
   shuffle storage.
 - **Autosave**: every 5 seconds during play, and on tab close. Gated on
   `appMode === 'playing'` — a menu-mode write would stamp `lastSaveTime` and
-  silently eat the player's offline progress (§4.1).
+  silently eat the player's offline progress (§4.1). Every write in `main.ts`
+  goes through one `persist()` helper so a refused write reaches the player.
+- **`saveGame` returns a `SaveWriteResult`**, and only `ok` means storage
+  changed. `lastSaveTime` is stamped on the write that actually happens, never
+  on a refused one, so a refusal leaves the caller's offline accounting intact.
+- **Two tabs, one save**: each tab loads its own `GameState` at boot, so a tab
+  holding an old snapshot could once autosave it straight over a tab that had
+  been playing for an hour — unrecoverable, since there is no server copy.
+  `saveGame` now defends: the module remembers the `lastSaveTime` it last saw
+  in storage (stamped on every load and every successful write) and refuses to
+  write when storage has moved past it, returning `conflict`. The refusal is
+  sticky by construction — the losing tab's baseline can never catch up — and
+  `main.ts` toasts once to say this tab has stopped saving and a reload is the
+  way back to the real progress. The rule is last-writer-keeps: the tab that
+  actually saved owns the save, and no merge is attempted.
+- **Unknown fields, and the types of the known ones**: `hydrate` builds the
+  state key by key and **strips** any unknown top-level field a hand-edited or
+  imported save carries. There is no
+  forward-compat scratch space at the top level: an unknown key is dropped on
+  the way in rather than living in the state object and being written back out
+  by the next autosave. (The strip is top-level; the nested `stats`,
+  `currencies` and `settings` blocks are still merged over defaults, and
+  `initEconomy` is what sanitises their values.) The fields hydrate resolves
+  itself are type-checked rather than merely defaulted: `lastSaveTime` and
+  `createdTime` must be finite numbers, `currentCarId` a string, and
+  `ownedCars` a real array — a string has a truthy `.length` too, and used to
+  reach the car catalog looking like a list of ids. Because the shape is
+  explicit, adding a `GameState` field is a compile error until `hydrate` names
+  it — which is the intended nudge toward a migration.
 - **Export**: `EVR1.` + base64(JSON). `importSave` validates the prefix and the
   decoded shape and returns `null` on anything malformed — the UI shows an
   inline error rather than throwing.
@@ -1124,6 +1191,58 @@ Implementation: `src/save/save.ts`.
   5-second autosave would otherwise overwrite the newer save with a fresh
   `defaultState()` within seconds. `clearSave()` deliberately leaves that backup
   key in place.
+- **Downgrade recovery**: the `-future` key is read back, not write-only. On
+  every boot `loadGame` checks it first and recovers what is parked there when
+  two things hold: the parked save is readable now (`version <= SAVE_VERSION`),
+  and its `version` is **strictly higher** than the version on the primary key.
+  That second rule is what a downgrade actually looks like — the older build
+  stamps its own lower version on everything it writes — and it is
+  self-limiting, which is what keeps the swap below from ping-ponging the two
+  keys on every boot. Save *times* are deliberately not the test: the fresh
+  start the older build wrote is always the more recent write, so a time
+  comparison would never fire.
+- **Recovery swaps, it does not delete**: the recovered save is written to the
+  primary key and the save it displaces is written into the `-future` key in
+  its place — a player who downgraded and then played the older build for a
+  month still has that month parked afterwards, out of the way rather than
+  gone. The two writes are separate `try` blocks on purpose. If the promotion
+  fails, nothing has moved and the next boot retries; if only the parking of
+  the displaced save fails, the recovered save is already on the primary key
+  and the version rule stops the stale backup from promoting itself over it
+  again. Recovery is skipped entirely while the primary key itself holds a
+  future-version save — the newest save in storage has first claim on the
+  backup slot.
+- **A build that cannot protect the newer save may not destroy it**: if parking
+  the refused save under the `-future` key throws (a transient write failure —
+  the permanent kind blocks the autosave too, which is why the save usually
+  survived by accident), a module flag latches and every `saveGame` for the
+  rest of the session is a no-op returning `locked`. The session plays; it just
+  does not write.
+- **`clearSave` parks before it erases**: `hasSave()` reads false for a
+  future-version save, so the menu disables Continue *and* skips the New
+  Journey confirmation — an unconfirmed click would otherwise land on
+  `clearSave` with the newest save in the world under the primary key. So when
+  the primary holds a future-version save, `clearSave` copies it to the
+  `-future` key first; that also protects it, which releases a latched write
+  lock. If it cannot be parked, nothing is cleared — storage that refuses
+  writes is not a reason to destroy the only copy of a journey — and the
+  session, still write-locked, says so through the warning below. An ordinary
+  save is cleared with no ceremony, and a `-future` backup already in place is
+  left alone (`clearSave` is "erase my progress", not "throw away the save this
+  build could not read").
+- **Telling the player**: `main.ts` keeps "a refusal is waiting" and "a refusal
+  has been shown" as two separate flags. The toast may not be raised at the
+  moment of the refusal — `gameToast` drops anything raised outside `playing`,
+  and the write on `visibilitychange` happens as the tab disappears, where a
+  4.5 s toast expires unseen — so the refusal is queued and the frame loop
+  flushes it once, when `appMode === 'playing'` and the tab is visible. All
+  three non-`ok` results warn, `error` included: full or blocked storage means
+  the player is not being saved either.
+- **Import adopts only what it managed to write**: the `importSave` action
+  sanitises the decoded save, writes it, and replaces the live state only if
+  that write returned `ok`. A refused write must not leave the game running a
+  journey that was never persisted, so the panel gets `false` and shows its
+  inline error instead.
 - **Offline**: `offlineSeconds(state, nowMs)` clamps the gap to
   `MAX_OFFLINE_SEC` (14 days). Coins are granted at the idle rate for that
   duration and reported through the `offlineSummary` event.
@@ -1185,6 +1304,11 @@ timePhase, weatherId }` in, `TickResult { coinsEarned }` out;
 **App shell** — `AppMode` (`'menu' | 'playing'`) on `runtime.appMode`, and
 `SaveSummary` (journey/lifetime miles, coins, resolved `carName`,
 `prestigeCount`, `lastSaveTime`) for the menu's Continue line.
+
+**Save** — `SaveWriteResult` (`'ok' | 'conflict' | 'locked' | 'error'`)
+returned by `saveGame`; anything but `ok` means storage was left untouched, and
+`main.ts` turns the two deliberate refusals into a single player-facing warning
+(§12).
 
 **Event bus** — `GameEvents` declares fifteen typed events: `achievement`,
 `pickup`, `purchase`, `carSelected`, `prestige`, `biomeChange`,
@@ -1338,12 +1462,11 @@ sandbox: true              the renderer runs in the OS sandbox
 
 The reason to treat these as a hard rule rather than a default worth revisiting
 is the shape of this particular renderer. It runs Three.js, a shader compiler,
-and a postprocessing stack — a large third-party surface parsing a lot of data
-— and it loads a webfont over the network. Any of that going wrong in a browser
-tab costs the tab. The same thing going wrong with `nodeIntegration: true`
-costs the user's filesystem. The safety property is worth more than any
-convenience that turning them off would buy, and nothing in the game wants Node
-anyway.
+and a postprocessing stack — a large third-party surface parsing a lot of data.
+Any of that going wrong in a browser tab costs the tab. The same thing going
+wrong with `nodeIntegration: true` costs the user's filesystem. The safety
+property is worth more than any convenience that turning them off would buy,
+and nothing in the game wants Node anyway.
 
 Everything else follows from the same reasoning. `setWindowOpenHandler` denies
 every popup unconditionally and hands nothing to the real browser: the game has
@@ -1373,8 +1496,8 @@ every asset:
 
 ```
 default-src 'self';  script-src 'self';
-style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
-font-src 'self' https://fonts.gstatic.com;
+style-src 'self' 'unsafe-inline';
+font-src 'self';
 img-src 'self' data: blob:;  connect-src 'self';
 object-src 'none';  base-uri 'none';  frame-src 'none';
 form-action 'none'
@@ -1387,9 +1510,16 @@ rewrites them by name — a positional edit is correct until someone reorders th
 list, and then it silently loosens the wrong directive.
 
 Each relaxation is something the shipped page genuinely needs, and the list is
-short enough to audit at a glance. `index.html` links a Google Fonts stylesheet,
-which is why those two hosts appear. `style-src 'unsafe-inline'` covers the
-inline styles the overlay writes. `img-src data:` covers the emoji favicon.
+short enough to audit at a glance. `style-src 'unsafe-inline'` covers the inline
+styles the overlay writes, and `img-src data:` covers the emoji favicon. Note
+what is *not* here: no remote host on any directive. Quicksand and JetBrains
+Mono are self-hosted from `src/fonts/` (latin subset, variable, one woff2 per
+family, ~58 kB committed), so `style-src` and `font-src` stay at `'self'` and a
+packaged launch with no network renders in the intended faces rather than
+reshaping into a system sans/mono. The `fonts.googleapis.com` /
+`fonts.gstatic.com` entries that used to sit on those two directives existed
+only to permit that remote load; adding a host back is a change to argue for,
+not a convenience.
 
 The important line is `script-src 'self'` with neither `'unsafe-inline'` nor
 `'unsafe-eval'`: it is what makes an injected string unable to become code, and

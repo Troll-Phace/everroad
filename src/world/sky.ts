@@ -18,6 +18,8 @@ const PAL = {
   glowDay: new THREE.Color('#fff2d9'),
   glowSunset: new THREE.Color('#ffb36b'),
   glowNight: new THREE.Color('#9db8e8'),
+  sunDisc: new THREE.Color('#fff3d0'),
+  sunEmber: new THREE.Color('#ff7a2e'),
 };
 
 /**
@@ -297,7 +299,7 @@ export class Sky {
     u.uTime.value = this.time;
 
     // Sun color: white-warm -> deep ember at the horizon; disc swells at sunset.
-    this.sunColor.copy(new THREE.Color('#fff3d0')).lerp(new THREE.Color('#ff7a2e'), golden);
+    this.sunColor.copy(PAL.sunDisc).lerp(PAL.sunEmber, golden);
     this.sunMat.color.copy(this.sunColor);
     const sunScale = 1 + golden * 1.15;
     this.sun.scale.setScalar(sunScale);

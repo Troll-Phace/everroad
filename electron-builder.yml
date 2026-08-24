@@ -101,6 +101,10 @@ linux:
   # noreply address: this string is embedded in public package metadata, so it
   # should not be anyone's personal inbox.
   maintainer: Troll-Phace <Troll-Phace@users.noreply.github.com>
+  # No `license:` key here: electron-builder 26 has no such option on `linux`,
+  # `rpm` or `deb` (setting one fails schema validation before packaging starts).
+  # The rpm's License field comes from `license` in package.json, which is MIT
+  # and must stay in agreement with the LICENSE file at the repo root.
   target:
     # AppImage runs anywhere without installing and needs no package manager.
     # rpm is the native install on Fedora/RHEL; building it needs rpmbuild on

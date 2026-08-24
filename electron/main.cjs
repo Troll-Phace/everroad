@@ -54,8 +54,10 @@ const BACKGROUND = '#2b1e4e';
  * Content-Security-Policy for every response.
  *
  * Tight by default; each relaxation below is something the shipped page
- * actually needs. `style-src 'unsafe-inline'` and the two Google Fonts hosts
- * are index.html's webfont link plus the inline styles the UI overlay writes.
+ * actually needs. `style-src 'unsafe-inline'` covers the inline styles the UI
+ * overlay writes. There are no remote hosts here at all: the type is
+ * self-hosted from src/fonts/, so `style-src` and `font-src` stay at 'self'
+ * and an offline launch renders in the intended faces.
  * `script-src 'self'` with no `unsafe-inline`/`unsafe-eval` is the important
  * one — it is what makes an injected string unable to become code.
  */
@@ -66,8 +68,8 @@ function contentSecurityPolicy() {
   const directives = {
     'default-src': "'self'",
     'script-src': "'self'",
-    'style-src': "'self' 'unsafe-inline' https://fonts.googleapis.com",
-    'font-src': "'self' https://fonts.gstatic.com",
+    'style-src': "'self' 'unsafe-inline'",
+    'font-src': "'self'",
     'img-src': "'self' data: blob:",
     'connect-src': "'self'",
     'object-src': "'none'",

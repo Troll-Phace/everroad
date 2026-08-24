@@ -504,3 +504,102 @@ describe('sampleTerrainMesh vs. the rendered geometry', () => {
     expect(worst, `worst disagreement at ${worstAt}`).toBeLessThan(1e-4);
   });
 });
+
+describe('terrain ribbon folding', () => {
+  /**
+   * The shipping seed — the fold is a property of a specific road, and the
+   * tight bends quoted in #36/#39 are that road's. `1 / |curvature(s)|` is
+   * exact, so check it before calling any stretch tight: s ~ 24.6 km has twice
+   * been mistaken for a bend here and is a 1928 m near-straight.
+   */
+  const SHIPPING_SEED = 20260824;
+  /** The tightest bends in the first 432 km: R 92.4, 91.3, 88.7 m. */
+  const TIGHT = [21123, 99129, 431619];
+
+  /** XZ cross product of a cell triangle, in the winding gridIndices emits. */
+  function windingOf(path: RoadPath, s: number, l0: number, l1: number): [number, number] {
+    const pt = (ss: number, ll: number) => path.point(ss, ll, new THREE.Vector3());
+    const a = pt(s, l0);
+    const b = pt(s, l1);
+    const c = pt(s + TER_ROW_STEP, l0);
+    const d = pt(s + TER_ROW_STEP, l1);
+    const cross = (P: THREE.Vector3, Q: THREE.Vector3, R: THREE.Vector3) =>
+      (Q.x - P.x) * (R.z - P.z) - (R.x - P.x) * (Q.z - P.z);
+    return [cross(a, b, c), cross(b, d, c)];
+  }
+
+  it('winds every cell the same way at the tightest bends the generator makes', () => {
+    const path = new RoadPath(SHIPPING_SEED);
+    for (const S of TIGHT) {
+      path.ensure(S + 400);
+      const R = 1 / Math.abs(path.curvature(S));
+      expect(R, `s=${S} is not actually a tight bend`).toBeLessThan(95);
+      for (let s = S - 120; s <= S + 120; s += TER_ROW_STEP) {
+        for (let j = 0; j < TER_COLS.length - 1; j++) {
+          const [t1, t2] = windingOf(path, s, TER_COLS[j], TER_COLS[j + 1]);
+          // Both triangles wind negative on an un-inverted cell; a fold flips
+          // the sign, which is what crumpled the far field.
+          expect(t1, `folded cell at s=${s} lat=${TER_COLS[j]}`).toBeLessThan(0);
+          expect(t2, `folded cell at s=${s} lat=${TER_COLS[j]}`).toBeLessThan(0);
+        }
+      }
+    }
+  });
+
+  it('winds every cell the same way across a long stretch of road', () => {
+    const path = new RoadPath(SHIPPING_SEED);
+    path.ensure(20000 + 100);
+    let folded = 0;
+    for (let s = 0; s < 20000; s += TER_ROW_STEP * 3) {
+      for (let j = 0; j < TER_COLS.length - 1; j++) {
+        const [t1, t2] = windingOf(path, s, TER_COLS[j], TER_COLS[j + 1]);
+        if (t1 >= 0 || t2 >= 0) folded++;
+      }
+    }
+    expect(folded).toBe(0);
+  });
+
+  it('lands every sample inside one of its own cell triangles at a tight bend', () => {
+    // The old fold left ~0.005% of samples inside neither triangle of the cell
+    // they belong to, so `sampleTerrainMesh` fell back to a parametric guess.
+    const path = new RoadPath(SHIPPING_SEED);
+    const inside = (A: Corner, B: Corner, C: Corner, px: number, pz: number): boolean => {
+      const e0x = B.x - A.x;
+      const e0z = B.z - A.z;
+      const e1x = C.x - A.x;
+      const e1z = C.z - A.z;
+      const den = e0x * e1z - e1x * e0z;
+      if (Math.abs(den) < 1e-9) return false;
+      const w1 = ((px - A.x) * e1z - e1x * (pz - A.z)) / den;
+      const w2 = (e0x * (pz - A.z) - (px - A.x) * e0z) / den;
+      return w1 >= -1e-6 && w2 >= -1e-6 && 1 - w1 - w2 >= -1e-6;
+    };
+    for (const S of TIGHT) {
+      path.ensure(S + 400);
+      for (let s = S - 60; s <= S + 60; s += 1.7) {
+        for (let j = 0; j < TER_COLS.length - 1; j++) {
+          for (const f of [0.13, 0.5, 0.87]) {
+            const lat = TER_COLS[j] + (TER_COLS[j + 1] - TER_COLS[j]) * f;
+            const [a, b, c, d] = cell(path, s, lat);
+            const p = path.point(s, lat, new THREE.Vector3());
+            const covered = inside(a, b, c, p.x, p.z) || inside(b, d, c, p.x, p.z);
+            expect(covered, `s=${s} lat=${lat} landed in neither triangle`).toBe(true);
+          }
+        }
+      }
+    }
+  });
+
+  it('leaves the near field alone at every curvature', () => {
+    // The compression only ever touches columns past 0.6 of the local radius,
+    // which is 52.6 m at the tightest bend the generator can produce — so the
+    // road, the car and everything grounded beside them are untouched.
+    const path = new RoadPath(SHIPPING_SEED);
+    path.ensure(2000);
+    for (let s = 0; s < 2000; s += 7) {
+      for (const lat of [-48, -30, -18, -10, -5.9, 0, 5.9, 10, 18, 30, 48]) {
+        expect(path.effectiveLateral(s, lat)).toBe(lat);
+      }
+    }
+  });
+});
