@@ -17,6 +17,7 @@ import { prestigePanel } from './panelPrestige';
 import { settingsPanel } from './panelSettings';
 import { trophiesPanel } from './panelTrophies';
 import { upgradesPanel } from './panelUpgrades';
+import { WHATS_NEW_PANEL_ID, whatsNewPanel } from './panelWhatsNew';
 import { createModeTransition } from './transition';
 
 export function initUI(deps: UIDeps): void {
@@ -42,10 +43,12 @@ export function initUI(deps: UIDeps): void {
   panels.register(prestigePanel(deps, panels));
   panels.register(settingsPanel(deps, panels, effects, transition));
   panels.register(helpPanel());
+  panels.register(whatsNewPanel());
 
   const menu = initMainMenu(deps, root, {
     transition,
     openSettings: () => panels.open('settings'),
+    openWhatsNew: () => panels.open(WHATS_NEW_PANEL_ID),
   });
 
   // ---- keyboard -----------------------------------------------------------
@@ -85,6 +88,13 @@ export function initUI(deps: UIDeps): void {
       if (transition.busy) return;
       if (panels.current !== null) panels.close();
       else panels.open('settings');
+      e.preventDefault();
+    } else if (key === 'n') {
+      // Live on the menu as well as in gameplay, like Esc and M: the patch
+      // notes describe the build, not the journey, and the menu's own corner
+      // button opens the same card. Still stands down during a mode fade.
+      if (transition.busy) return;
+      panels.toggle(WHATS_NEW_PANEL_ID);
       e.preventDefault();
     } else if (key === 'm') {
       // Also live on the menu, where the footer advertises it. Its toast is

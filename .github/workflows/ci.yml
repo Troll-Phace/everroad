@@ -77,6 +77,22 @@ jobs:
       - name: Generated models are up to date
         run: npm run models:check
 
+  changelog:
+    name: Changelog codegen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # CHANGELOG.md is the source of truth for in-game patch notes, and this
+      # is the gate that keeps it, package.json's version and the release tag
+      # in agreement. It also fails on a hand-edited generated module.
+      - name: Generated changelog is up to date
+        run: npm run changelog:check
+
   build:
     name: Build & bundle budget
     runs-on: ubuntu-latest
@@ -114,7 +130,7 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, typecheck, test, models, build, audit]
+    needs: [format, typecheck, test, models, changelog, build, audit]
     steps:
       - name: Gate on required jobs
         run: |
@@ -122,6 +138,7 @@ jobs:
           echo "typecheck=${{ needs.typecheck.result }}"
           echo "test=${{ needs.test.result }}"
           echo "models=${{ needs.models.result }}"
+          echo "changelog=${{ needs.changelog.result }}"
           echo "build=${{ needs.build.result }}"
           echo "audit=${{ needs.audit.result }}"
           if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then

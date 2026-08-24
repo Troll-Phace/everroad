@@ -757,6 +757,122 @@
   color: var(--text-dim);
 }
 
+/* ---------- what's new ---------- */
+
+/* Each release is a disclosure: a full-width ghost button whose `aria-expanded`
+   drives the caret, and a body the `.hidden` utility collapses. `display: none`
+   is doing double duty there — it is also what keeps a collapsed release out of
+   the panel's focus trap, which filters on `offsetParent`. */
+.release + .release {
+  border-top: 1px solid var(--glass-border);
+}
+
+.release-toggle {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  width: 100%;
+  padding: 0.6rem 0.2rem;
+  border: none;
+  border-radius: 8px;
+  text-align: left;
+}
+.release-toggle:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  transform: none;
+}
+
+.release-caret {
+  font-size: 0.7rem;
+  color: var(--accent);
+  transition: transform 0.25s ease;
+}
+.release-toggle[aria-expanded='true'] .release-caret {
+  transform: rotate(90deg);
+}
+
+.release-version {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+.release-date {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  margin-left: auto;
+}
+
+.release-body {
+  padding: 0.2rem 0.2rem 0.9rem 1.25rem;
+}
+/* The generated section headings (Added / Changed / Fixed) reuse the panel
+   section-label idiom rather than inventing a heading style; only the rhythm
+   inside a release body differs. */
+.release-body .section-label {
+  margin-bottom: 0.4rem;
+}
+.release-body .section-label:not(:first-child) {
+  margin-top: 0.9rem;
+}
+
+.release-items {
+  list-style: disc;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-main);
+}
+.release-items::marker,
+.release-items li::marker {
+  color: var(--text-dim);
+}
+
+.whatsnew-strong {
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.whatsnew-empty {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+/* Text that exists only for assistive technology: off-screen but still in the
+   accessibility tree, so it is announced whatever role its container maps to.
+   `user-select: none` keeps it out of a copied selection — the build badges
+   below wrap one of these, and dragging across a badge must still yield just
+   the terse `v0.1.17 · web · a1b2c3d` line. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Build badge at the foot of the settings panel. Selectable on purpose: the
+   whole point is that it can be copied into a bug report, and `body` sets
+   `user-select: none` for everything else. */
+.build-badge {
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  pointer-events: auto;
+}
+
 /* ---------- toasts ---------- */
 
 .toast-stack {
@@ -1124,6 +1240,76 @@
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
 }
 
+/* ---------- menu corner furniture ----------
+   The What's New button and the build badge belong to the frame, not to the
+   left-hand column, but they are children of `.menu-inner` so that the `inert`
+   attribute set there while a panel is open takes them with the action slabs.
+   `position: fixed` is what lets them sit in the corners from inside a column
+   that only spans 38rem; `.menu-inner` establishes no containing block for
+   fixed descendants (its opacity recede makes a stacking context, not a
+   containing block). */
+
+.menu-corner-btn {
+  position: fixed;
+  top: clamp(0.9rem, 3vh, 1.5rem);
+  right: clamp(0.9rem, 3vw, 1.6rem);
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  padding: 0.5em 0.9em;
+  border-radius: 999px;
+  /* Same heavier glass as the action slabs: this button also carries text
+     straight over the live world, which may be a blazing dawn. */
+  background: var(--glass-bg-strong);
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+}
+.menu-corner-btn:hover:not(:disabled) {
+  background: linear-gradient(90deg, var(--accent-soft), transparent 80%), var(--glass-bg-strong);
+  border-color: var(--accent);
+  box-shadow: 0 0 18px var(--accent-soft);
+  transform: none;
+}
+.menu-corner-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  /* Dark ring behind the accent outline, as on .menu-btn: the sky is allowed
+     to be exactly the accent color. */
+  box-shadow:
+    0 0 0 5px rgba(var(--scrim-rgb), 0.8),
+    0 0 24px var(--accent-soft);
+}
+
+.menu-corner-label {
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.55);
+}
+
+/* Affordance only — "there is something here you have not read". The button's
+   own label carries the meaning, so nothing is lost when the dot is absent. */
+.menu-corner-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 8px var(--accent);
+}
+
+/* Bottom corner, quieter than the footer key hints and deliberately selectable
+   so it can be pasted into a bug report. */
+.menu-build {
+  position: fixed;
+  right: clamp(0.9rem, 3vw, 1.6rem);
+  bottom: clamp(0.8rem, 2.5vh, 1.3rem);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  color: var(--menu-ink-dim);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.75);
+  user-select: text;
+  -webkit-user-select: text;
+  cursor: text;
+  pointer-events: auto;
+}
+
 /* One-time entrance, timed to land as the loading screen lifts. */
 .menu-boot .menu-scrim {
   animation: menu-fade 1.1s ease 0.35s both;
@@ -1201,6 +1387,9 @@ body[data-appmode='menu'][data-panel] .menu-inner {
   .menu-btn:hover:not(:disabled) {
     transform: none;
   }
+  .release-caret {
+    transition-duration: 0.01ms;
+  }
 }
 
 /* ---------- small screens ---------- */
@@ -1233,6 +1422,13 @@ body[data-appmode='menu'][data-panel] .menu-inner {
       rgba(var(--scrim-rgb), 0.7) 58%,
       rgba(var(--scrim-rgb), 0.92) 100%
     );
+  }
+  /* The column becomes a bottom sheet that runs to the foot of the screen, so
+     a fixed bottom-right badge would land on top of the footer. Flow it into
+     the sheet instead. */
+  .menu-build {
+    position: static;
+    align-self: flex-start;
   }
   .menu-wordmark {
     letter-spacing: 0.22em;

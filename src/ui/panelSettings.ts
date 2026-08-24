@@ -1,13 +1,17 @@
 /**
- * Settings panel: audio, quality, fps counter, quit to menu, and save
- * export/import/reset. Reachable from gameplay and from the main menu; rows
- * that only make sense in one of the two are gated on `runtime.appMode`.
+ * Settings panel: audio, quality, fps counter, the session quit rows, save
+ * export/import/reset, and the build badge. Reachable from gameplay and from
+ * the main menu; rows that only make sense in one of the two are gated on
+ * `runtime.appMode`, and the desktop-only quit on `isDesktop()`.
  *
  * Note on volumes: UIActions only exposes setAudioEnabled/setQuality, so the
  * music/sfx sliders mutate state.settings.musicVolume/sfxVolume directly —
  * the audio engine reads those live each update.
  */
 import type { GameSettings, UIDeps } from '../types';
+import { isDesktop } from '../version/version';
+import { desktop } from '../version/desktop';
+import { createBuildBadge } from './buildBadge';
 import { armConfirm } from './confirm';
 import { el } from './dom';
 import type { Effects } from './effects';
@@ -90,24 +94,55 @@ export function settingsPanel(
       });
       content.append(row('Show FPS', fpsToggle));
 
-      // ---- quit to menu ---------------------------------------------------
-      // Only meaningful in gameplay: the menu is already where this leads.
-      if (runtime.appMode === 'playing') {
+      // ---- session --------------------------------------------------------
+      // Quit to Main Menu is gameplay-only: on the menu it leads where the
+      // player already is. Quit to Desktop is not — closing the app from the
+      // title screen is the ordinary case for a desktop build — so the section
+      // shows whenever either row has something to offer.
+      const inGame = runtime.appMode === 'playing';
+      if (inGame || isDesktop()) {
         content.append(el('div', 'panel-divider'));
         content.append(el('div', 'section-label', 'Session'));
 
-        const quitBtn = el('button', 'btn btn-big', 'Quit to Main Menu');
-        // A browser tab cannot close itself, so "quit" means exactly this:
-        // save, then hand the world back to the attract-mode menu.
-        const quitNote = el('div', 'settings-note', 'Saves your journey first.');
-        quitBtn.addEventListener('click', () => {
-          if (transition.busy) return;
-          transition.run(() => {
-            manager.close();
-            actions.quitToMenu();
+        if (inGame) {
+          const quitBtn = el('button', 'btn btn-big', 'Quit to Main Menu');
+          // In the WEB build this is the only "quit" there is: a browser tab
+          // cannot close itself, so quitting means saving and handing the world
+          // back to the attract-mode menu. The desktop build adds the real one
+          // below and keeps this as the way back to the title screen.
+          const quitNote = el('div', 'settings-note', 'Saves your journey first.');
+          quitBtn.addEventListener('click', () => {
+            if (transition.busy) return;
+            transition.run(() => {
+              manager.close();
+              actions.quitToMenu();
+            });
           });
-        });
-        content.append(quitBtn, quitNote);
+          content.append(quitBtn, quitNote);
+        }
+
+        if (isDesktop()) {
+          const exitBtn = el('button', 'btn btn-big', 'Quit to Desktop');
+          const exitNote = el(
+            'div',
+            'settings-note',
+            inGame ? 'Saves your journey, then closes Everroad.' : 'Closes Everroad.',
+          );
+          // A plain button, not armConfirm: DESIGN_SYSTEM §4.2 reserves the
+          // arm-and-confirm for actions that destroy something, and this one
+          // destroys nothing — in gameplay it goes out through the same saving
+          // path as Quit to Main Menu, and on the title screen there is no
+          // session to lose in the first place.
+          exitBtn.addEventListener('click', () => {
+            if (transition.busy) return;
+            // `quitToMenu` is the save path the UI is given; UIActions exposes
+            // no bare save(). Gated on there being a session, since on the menu
+            // it would reset the attract scene for the last frame before exit.
+            if (runtime.appMode === 'playing') actions.quitToMenu();
+            desktop()?.quit();
+          });
+          content.append(exitBtn, exitNote);
+        }
       }
 
       // ---- save -----------------------------------------------------------
@@ -173,6 +208,12 @@ export function settingsPanel(
         },
       });
       content.append(resetBtn);
+
+      // ---- build ----------------------------------------------------------
+      // Last line in the panel, quiet and selectable: its whole job is to be
+      // pasted into a bug report.
+      content.append(el('div', 'panel-divider'));
+      content.append(createBuildBadge('build-badge mono'));
     },
   };
 }

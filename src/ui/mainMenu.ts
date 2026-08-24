@@ -7,14 +7,17 @@
  * sit on, and text shadow, never from assuming a dark sky.
  *
  * The menu owns no game state. Continue / New Journey go through
- * `UIActions.startGame` behind the mode fade; Settings hands off to the panel
- * manager via the `openSettings` callback so this module stays panel-agnostic.
+ * `UIActions.startGame` behind the mode fade; Settings and What's New hand off
+ * to the panel manager via the `openSettings` / `openWhatsNew` callbacks so
+ * this module stays panel-agnostic.
  */
 import type { AppMode, SaveSummary, UIDeps } from '../types';
 import { formatDuration, formatMiles, formatNumber } from '../types';
 import { armConfirm } from './confirm';
+import { createBuildBadge } from './buildBadge';
 import { el, textUpdater } from './dom';
 import { CURRENCY_ICONS } from './icons';
+import { hasUnseenRelease, markSeen } from './panelWhatsNew';
 import type { ModeTransition } from './transition';
 
 /**
@@ -48,6 +51,8 @@ export interface MainMenuOptions {
   transition: ModeTransition;
   /** Opens the settings panel over the menu. */
   openSettings(): void;
+  /** Opens the What's New panel over the menu. */
+  openWhatsNew(): void;
 }
 
 interface MenuButton {
@@ -94,12 +99,34 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
   const settings = menuButton('Settings');
   settings.sub.textContent = 'Audio, graphics and your save code';
 
-  const footer = el('div', 'menu-footer', '↑ ↓ choose  ·  Enter start  ·  Esc settings  ·  M mute');
+  const footer = el(
+    'div',
+    'menu-footer',
+    '↑ ↓ choose  ·  Enter start  ·  Esc settings  ·  N what\u2019s new  ·  M mute',
+  );
 
-  inner.append(brand, actionList, footer);
+  // ---- corner furniture ---------------------------------------------------
+  // Both of these live inside `inner`, not on `layer`, so the `inert` attribute
+  // set on `inner` while a panel is open covers them with the action column.
+  // Anything appended to `layer` instead would stay keyboard-live behind an
+  // open card — the PR #46 defect. They are `position: fixed` in CSS because
+  // `inner` is only the left-hand column and these belong to the frame.
+  const whatsNew = el('button', 'btn panel-glass menu-corner-btn');
+  whatsNew.type = 'button';
+  whatsNew.append(el('span', 'menu-corner-label', 'What\u2019s New'));
+  const newDot = el('span', 'menu-corner-dot hidden');
+  newDot.setAttribute('aria-hidden', 'true');
+  whatsNew.append(newDot);
+
+  const build = createBuildBadge('menu-build mono');
+
+  inner.append(brand, actionList, footer, whatsNew, build);
   layer.append(scrim, inner);
   root.append(layer);
 
+  // The Up/Down cycle, deliberately only the three centre slabs. The corner
+  // What's New button is Tab-reachable but is not part of the column, and
+  // arrowing into it would step the focus out of the frame's centre.
   const buttons = [cont.btn, fresh.btn, settings.btn];
 
   // ---- live text ----------------------------------------------------------
@@ -161,6 +188,10 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
     // The primary action is whichever one the player most likely wants.
     cont.btn.classList.toggle('is-primary', hasSave);
     fresh.btn.classList.toggle('is-primary', !hasSave);
+
+    // Purely an affordance: the dot says there is something unread, the button
+    // says what it is. Nothing is communicated by the dot alone.
+    newDot.classList.toggle('hidden', !hasUnseenRelease());
   }
 
   /** Only the relative time drifts while the menu sits open. */
@@ -183,6 +214,17 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
   settings.btn.addEventListener('click', () => {
     if (transition.busy) return;
     opts.openSettings();
+  });
+
+  // Same guarded hand-off as Settings: the panel manager owns the card, this
+  // module only asks for it.
+  whatsNew.addEventListener('click', () => {
+    if (transition.busy) return;
+    // The panel marks the build seen as it renders; clear the dot here too so
+    // the affordance goes quiet on the click that answered it.
+    markSeen();
+    newDot.classList.add('hidden');
+    opts.openWhatsNew();
   });
 
   // ---- keyboard -----------------------------------------------------------

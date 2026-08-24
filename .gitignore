@@ -13,3 +13,8 @@ dist/
 *.blend
 *.blend[0-9]*
 __pycache__/
+
+# electron-builder output and its caches
+release/
+.cache/electron/
+.cache/electron-builder/

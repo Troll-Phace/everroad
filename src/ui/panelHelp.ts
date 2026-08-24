@@ -14,6 +14,7 @@ const CONTROLS: Array<[string, string]> = [
   ['P', 'New Journey (prestige)'],
   ['M', 'Mute audio'],
   ['H', 'This help'],
+  ['N', "What's New — the patch notes for this build"],
   ['Esc', 'Close panel / settings'],
 ];
 
