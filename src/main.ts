@@ -14,6 +14,7 @@ import { ChaseCamera } from './world/camera';
 import { Weather } from './world/weather';
 import { Pickups } from './world/pickups';
 import { PostFX } from './world/postfx';
+import { SunShadow } from './world/sunShadow';
 import { BIOMES, biomeAt, blendColor, blendNumber } from './world/biomes';
 import * as economy from './game/economy/economy';
 import { CARS, getCarDef } from './game/economy/cars';
@@ -75,19 +76,10 @@ scene.fog = new THREE.FogExp2('#d2ecd2', 0.0045);
 
 const hemi = new THREE.HemisphereLight('#bfe3ff', '#7ec850', 0.75);
 scene.add(hemi);
-const sun = new THREE.DirectionalLight('#fff2d9', 1.6);
-sun.castShadow = true;
-sun.shadow.mapSize.set(2048, 2048);
-sun.shadow.camera.left = -60;
-sun.shadow.camera.right = 60;
-sun.shadow.camera.top = 60;
-sun.shadow.camera.bottom = -60;
-sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 500;
-sun.shadow.bias = -0.0002;
-sun.shadow.normalBias = 2.2;
-scene.add(sun);
-scene.add(sun.target);
+// The shadow rig owns the light's placement, shadow camera and night gating;
+// colour and intensity are driven from the sky below.
+const sunShadow = new SunShadow(scene, '#fff2d9', 1.6);
+const sun = sunShadow.light;
 
 // ---------------------------------------------------------------------------
 // World systems
@@ -275,6 +267,10 @@ applyAccent(runtime.biomeId);
 const fogColor = new THREE.Color();
 const fogTint = new THREE.Color();
 const groundTint = new THREE.Color();
+// Lerp targets, hoisted: the frame loop holds a zero steady-state allocation
+// budget (docs/ARCHITECTURE.md §14).
+const MOONLIT_TINT = new THREE.Color('#9db8e8');
+const WHITE = new THREE.Color('#ffffff');
 let lastNow = performance.now();
 let achTimer = 0;
 let saveTimer = 0;
@@ -406,13 +402,13 @@ function frame(now: number): void {
   const mist = weather.fogMultiplier(blendNumber(vehicle.s, (b) => b.mist));
   fog.density = 0.0038 * mist * (1 + snap.nightness * 0.25);
 
-  // Lights follow the sun.
-  sun.position.copy(vehicle.root.position).addScaledVector(snap.sunDir, 260);
-  sun.target.position.copy(vehicle.root.position);
+  // Lights follow the sun. The shadow rig re-derives its placement from the
+  // car's post-rebase position every frame, so it never caches world coords.
+  sunShadow.update(snap, vehicle.root.position, vehicle.yaw);
   const dayI = 1.55 * Math.max(0.12, Math.min(1, (snap.elevation + 0.1) * 3));
   sun.intensity = THREE.MathUtils.lerp(dayI, 0.22, snap.nightness);
-  sun.color.copy(sky.sunColor).lerp(new THREE.Color('#9db8e8'), snap.nightness);
-  hemi.color.copy(sky.zenithColor).lerp(new THREE.Color('#ffffff'), 0.3);
+  sun.color.copy(sky.sunColor).lerp(MOONLIT_TINT, snap.nightness);
+  hemi.color.copy(sky.zenithColor).lerp(WHITE, 0.3);
   blendColor(vehicle.s, (b) => b.ground, groundTint);
   hemi.groundColor.copy(groundTint).multiplyScalar(0.9);
   hemi.intensity = 0.72 - snap.nightness * 0.28;

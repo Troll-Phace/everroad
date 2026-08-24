@@ -23,15 +23,297 @@ interface Chunk {
   geos: THREE.BufferGeometry[];
 }
 
-/** Terrain height in path space — shared by terrain mesh + scenery placement. */
-export function terrainHeight(path: RoadPath, s: number, lat: number): number {
-  const roadY = path.elevation(s);
+/**
+ * Terrain lateral columns in meters from the centerline, nonuniform so the
+ * land is finely sampled beside the road and coarse out in the fields. The
+ * terrain mesh is built on exactly this column set (§5.3), so anything that
+ * grounds to the *drawn* surface has to walk the same grid.
+ */
+export const TER_COLS = [
+  -165, -115, -75, -48, -30, -18, -10, -5.9, 5.9, 10, 18, 30, 48, 75, 115, 165,
+];
+/**
+ * Terrain grid spacing along s, in meters. Divides CHUNK_LEN evenly, so rows
+ * land on the same absolute s in every chunk and seams stay watertight.
+ */
+export const TER_ROW_STEP = 6;
+
+/**
+ * The land height field at (s, lat) given the road's own elevation there.
+ * Split out of `terrainHeight` so callers that already hold `roadY` — a
+ * terrain row, a sampled grid cell — do not re-walk the path per column.
+ */
+function landHeight(roadY: number, s: number, lat: number): number {
   const a = Math.abs(lat);
   const hills = noise2(s * 0.006, lat * 0.011) * 7 + noise2(s * 0.0016, lat * 0.0028) * 16;
   const far = THREE.MathUtils.smoothstep(a, 55, 160);
   const rise = far * (10 + noise2(s * 0.001, lat * 0.002) * 14);
   const blendK = THREE.MathUtils.smoothstep(a, 6.2, 30);
   return roadY - 0.06 + blendK * (hills * 0.55 + rise) - blendK * 1.2;
+}
+
+/**
+ * Terrain height field in path space. This is the *analytic* surface, sampled
+ * by the terrain mesh at its grid vertices — between them the drawn surface is
+ * the flat triangle, so use `sampleTerrainMesh` to stand something on the land.
+ */
+export function terrainHeight(path: RoadPath, s: number, lat: number): number {
+  return landHeight(path.elevation(s), s, lat);
+}
+
+/** A point on the terrain as it is actually rendered. */
+export interface TerrainSample {
+  /** World-space height of the drawn surface (absolute, not chunk-local). */
+  y: number;
+  /** Unit face normal of the triangle under the point, always pointing up. */
+  normal: THREE.Vector3;
+  /**
+   * True when the cell folded over itself in XZ, so `normal` was flipped back
+   * up and its slope DIRECTION is mirrored — meaningless, not merely noisy.
+   * Callers must not lean anything along it. See `fillFromTriangle`.
+   */
+  folded: boolean;
+}
+
+/** Allocate a reusable `TerrainSample` — sampling itself allocates nothing. */
+export function createTerrainSample(): TerrainSample {
+  return { y: 0, normal: new THREE.Vector3(0, 1, 0), folded: false };
+}
+
+// Cell corners for sampleTerrainMesh: 0 = (s0,l0) 1 = (s0,l1) 2 = (s1,l0)
+// 3 = (s1,l1). Module scope so per-prop sampling stays allocation-free.
+const cornerX = new Float64Array(4);
+const cornerY = new Float64Array(4);
+const cornerZ = new Float64Array(4);
+const poseLo = { pos: new THREE.Vector3(), heading: 0 };
+const poseHi = { pos: new THREE.Vector3(), heading: 0 };
+const queryP = new THREE.Vector3();
+const edgeU = new THREE.Vector3();
+const edgeV = new THREE.Vector3();
+/** Barycentric slack, in normalized weight units, for on-edge points. */
+const BARY_EPS = 1e-6;
+
+/**
+ * Height and face normal of the terrain *as drawn* at (s, lat).
+ *
+ * `terrainHeight` is the smooth field the terrain mesh samples at its grid
+ * vertices; between them the rendered surface is the flat triangle, which on a
+ * slope or a hill crest sits metres away from the field. Scenery grounds to
+ * this function so props touch the surface the player actually sees
+ * (docs/ARCHITECTURE.md §5.3, §5.7).
+ *
+ * Writes into `out` using module-scope scratch, so it is not reentrant: never
+ * call it again before you are done reading the previous result.
+ */
+export function sampleTerrainMesh(
+  path: RoadPath,
+  s: number,
+  lat: number,
+  out: TerrainSample,
+): TerrainSample {
+  // Beyond the meshed span nothing is drawn, so the edge column is the nearest
+  // surface there is to stand on.
+  const l = THREE.MathUtils.clamp(lat, TER_COLS[0], TER_COLS[TER_COLS.length - 1]);
+  let j = 0;
+  while (j < TER_COLS.length - 2 && l > TER_COLS[j + 1]) j++;
+  const l0 = TER_COLS[j];
+  const l1 = TER_COLS[j + 1];
+  const s0 = Math.floor(s / TER_ROW_STEP) * TER_ROW_STEP;
+  const s1 = s0 + TER_ROW_STEP;
+
+  path.pose(s0, poseLo);
+  path.pose(s1, poseHi);
+  fillCorner(0, poseLo, s0, l0);
+  fillCorner(1, poseLo, s0, l1);
+  fillCorner(2, poseHi, s1, l0);
+  fillCorner(3, poseHi, s1, l1);
+  path.point(s, l, queryP);
+
+  // gridIndices emits (a,b,c) then (b,d,c), so the cell's diagonal runs from
+  // the near row's far column to the far row's near column. Splitting the
+  // other way leaves props off by the whole diagonal error.
+  if (triangleAt(0, 1, 2, queryP.x, queryP.z, out)) return out;
+  if (triangleAt(1, 3, 2, queryP.x, queryP.z, out)) return out;
+
+  // Far out on a tight curve the lateral mapping folds over itself and the
+  // point can land in neither triangle (measured at 0.008% of samples over
+  // 20 km, none inside |lat| 108). Fall back to the parametric split.
+  const u = (s - s0) / TER_ROW_STEP;
+  const v = (l - l0) / (l1 - l0);
+  if (u + v <= 1) fillFromTriangle(0, 1, 2, 1 - u - v, v, u, out);
+  else fillFromTriangle(1, 3, 2, 1 - u, u + v - 1, 1 - v, out);
+  return out;
+}
+
+const sharedSample = createTerrainSample();
+
+/** Height of the drawn terrain at (s, lat). Normal-free convenience wrapper. */
+export function terrainMeshHeight(path: RoadPath, s: number, lat: number): number {
+  return sampleTerrainMesh(path, s, lat, sharedSample).y;
+}
+
+function fillCorner(
+  i: number,
+  pose: { pos: THREE.Vector3; heading: number },
+  s: number,
+  lat: number,
+): void {
+  // Right-hand normal of the heading, matching RoadPath.point exactly.
+  const nx = -Math.cos(pose.heading);
+  const nz = Math.sin(pose.heading);
+  cornerX[i] = pose.pos.x + nx * lat;
+  cornerZ[i] = pose.pos.z + nz * lat;
+  cornerY[i] = landHeight(pose.pos.y, s, lat);
+}
+
+/**
+ * Barycentric lookup of (px, pz) in one cell triangle, projected to XZ.
+ * Returns false when the point is outside it or the triangle is degenerate.
+ */
+function triangleAt(
+  i0: number,
+  i1: number,
+  i2: number,
+  px: number,
+  pz: number,
+  out: TerrainSample,
+): boolean {
+  const e0x = cornerX[i1] - cornerX[i0];
+  const e0z = cornerZ[i1] - cornerZ[i0];
+  const e1x = cornerX[i2] - cornerX[i0];
+  const e1z = cornerZ[i2] - cornerZ[i0];
+  const den = e0x * e1z - e1x * e0z;
+  if (Math.abs(den) < 1e-9) return false;
+  const dx = px - cornerX[i0];
+  const dz = pz - cornerZ[i0];
+  const w1 = (dx * e1z - e1x * dz) / den;
+  const w2 = (e0x * dz - dx * e0z) / den;
+  const w0 = 1 - w1 - w2;
+  if (w0 < -BARY_EPS || w1 < -BARY_EPS || w2 < -BARY_EPS) return false;
+  fillFromTriangle(i0, i1, i2, w0, w1, w2, out);
+  return true;
+}
+
+/** Interpolate height and take the face normal of one cell triangle. */
+function fillFromTriangle(
+  i0: number,
+  i1: number,
+  i2: number,
+  w0: number,
+  w1: number,
+  w2: number,
+  out: TerrainSample,
+): void {
+  out.y = w0 * cornerY[i0] + w1 * cornerY[i1] + w2 * cornerY[i2];
+  edgeU.set(cornerX[i1] - cornerX[i0], cornerY[i1] - cornerY[i0], cornerZ[i1] - cornerZ[i0]);
+  edgeV.set(cornerX[i2] - cornerX[i0], cornerY[i2] - cornerY[i0], cornerZ[i2] - cornerZ[i0]);
+  out.normal.crossVectors(edgeU, edgeV);
+  const len = out.normal.length();
+  if (len < 1e-9) {
+    out.normal.set(0, 1, 0);
+    out.folded = false;
+    return;
+  }
+  out.normal.divideScalar(len);
+  // A cell whose lateral mapping inverted (the road's minimum radius of
+  // curvature is ~88 m while TER_COLS reaches ±165 m, so the far field folds
+  // on tight bends: ~0.7% of cells past |lat| 90, ~6% past 150) winds
+  // backwards and crosses downward. Flip it up so the value is at least
+  // usable as a surface, but flag it — the slope it describes points the
+  // wrong way, so leaning a prop along it tilts it the wrong way.
+  if (out.normal.y < 0) {
+    out.normal.negate();
+    out.folded = true;
+  } else {
+    out.folded = false;
+  }
+}
+
+/**
+ * How far each scenery kind leans toward the terrain face it stands on:
+ * 1 = flush with the slope, 0 = bolt upright. Things that lie on the ground
+ * follow it; things with a trunk or a foundation grew/were built vertical and
+ * only pick up a hint of the lean (docs/ARCHITECTURE.md §5.7).
+ */
+export const SLOPE_FOLLOW: Record<SceneryKind, number> = {
+  oak: 0.2,
+  maple: 0.2,
+  pine: 0.15,
+  poplar: 0.12,
+  cherryTree: 0.2,
+  rock: 1,
+  flowers: 0.95,
+  grassTuft: 1,
+  hay: 0.9,
+  fence: 0.8,
+  windmill: 0.1,
+  sunflowerPatch: 0.85,
+  lavenderRow: 0.85,
+  reeds: 0.9,
+};
+/**
+ * Ceiling on the face angle a prop will answer to, in radians (~29°). Real
+ * land tops out near 26°; anything steeper is the far-field cell fold, and
+ * without the cap a prop out there would lie down.
+ */
+const MAX_TILT = 0.5;
+/** Sink for a prop lying flush with the face — just enough to kill the seam. */
+const SINK_FLUSH = 0.03;
+/**
+ * Sink for a prop kept upright on a slope: its base has to bury far enough
+ * that the downhill edge does not lift off. Interpolated by SLOPE_FOLLOW.
+ */
+const SINK_UPRIGHT = 0.14;
+
+const tiltEuler = new THREE.Euler();
+const tiltAxis = new THREE.Vector3();
+const tiltQuat = new THREE.Quaternion();
+
+/**
+ * Orientation for one scenery prop: its yaw, leaned `follow` of the way from
+ * world-up toward the terrain face normal and capped at `MAX_TILT`. Pure and
+ * deterministic — it draws no random numbers, so seeded placement is untouched.
+ */
+export function propOrientation(
+  yaw: number,
+  normal: THREE.Vector3,
+  follow: number,
+  out: THREE.Quaternion,
+): THREE.Quaternion {
+  out.setFromEuler(tiltEuler.set(0, yaw, 0));
+  const face = Math.acos(THREE.MathUtils.clamp(normal.y, -1, 1));
+  const lean = Math.min(face, MAX_TILT) * follow;
+  if (lean > 1e-4) {
+    // Rotating world-up about (up x normal) swings it toward the normal.
+    tiltAxis.set(normal.z, 0, -normal.x);
+    if (tiltAxis.lengthSq() > 1e-12) {
+      out.premultiply(tiltQuat.setFromAxisAngle(tiltAxis.normalize(), lean));
+    }
+  }
+  return out;
+}
+
+const groundSample = createTerrainSample();
+
+/**
+ * Settle one scenery prop onto the land: returns the world height its origin
+ * sits at — the terrain *as drawn*, sunk by as much as its uprightness needs —
+ * and writes its orientation into `outQuat`. Deterministic in (s, lat, yaw),
+ * so it draws no random numbers and leaves seeded placement untouched.
+ */
+export function groundProp(
+  path: RoadPath,
+  s: number,
+  lat: number,
+  kind: SceneryKind,
+  yaw: number,
+  outQuat: THREE.Quaternion,
+): number {
+  sampleTerrainMesh(path, s, lat, groundSample);
+  // Stand upright rather than lean the wrong way on a folded cell.
+  const follow = groundSample.folded ? 0 : SLOPE_FOLLOW[kind];
+  propOrientation(yaw, groundSample.normal, follow, outQuat);
+  return groundSample.y - THREE.MathUtils.lerp(SINK_UPRIGHT, SINK_FLUSH, follow);
 }
 
 // Road cross-section: lateral offsets + which paint each column carries.
@@ -55,10 +337,6 @@ const ROAD_PAINT: Paint[] = [
 const COL_DIRT = new THREE.Color('#96795a');
 const COL_ASPHALT = new THREE.Color('#4d4d5c');
 const COL_CREAM = new THREE.Color('#f2e5c0');
-
-// Terrain lateral columns (nonuniform: fine near road).
-const TER_COLS = [-165, -115, -75, -48, -30, -18, -10, -5.9, 5.9, 10, 18, 30, 48, 75, 115, 165];
-const TER_ROW_STEP = 6;
 
 export class ChunkManager {
   private chunks = new Map<number, Chunk>();
@@ -199,6 +477,7 @@ export class ChunkManager {
 
     for (let r = 0; r < rows; r++) {
       const s = s0 + r * TER_ROW_STEP;
+      const roadY = this.path.elevation(s);
       blendColor(s, (b) => b.ground, ground);
       blendColor(s, (b) => b.groundAlt, groundAlt);
       for (let j = 0; j < cols; j++) {
@@ -206,7 +485,7 @@ export class ChunkManager {
         this.path.point(s, lat, p);
         const k = (r * cols + j) * 3;
         pos[k] = p.x - anchor.x;
-        pos[k + 1] = terrainHeight(this.path, s, lat);
+        pos[k + 1] = landHeight(roadY, s, lat);
         pos[k + 2] = p.z - anchor.z;
         // Color: noise blend between ground tones + gentle brightness wobble.
         const t = noise2(s * 0.02 + 7, lat * 0.03) * 0.5 + 0.5;
@@ -245,7 +524,6 @@ export class ChunkManager {
     const colOut: number[] = [];
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
-    const eul = new THREE.Euler();
     const vec = new THREE.Vector3();
     const nrm = new THREE.Vector3();
     const nm = new THREE.Matrix3();
@@ -301,17 +579,14 @@ export class ChunkManager {
           : r() * Math.PI * 2;
 
       this.path.point(s, lat, worldP);
-      const y = terrainHeight(this.path, s, lat);
+      // Ground to the terrain as drawn, not to the height field the mesh only
+      // samples at its grid vertices — between them they differ by metres.
+      const y = groundProp(this.path, s, lat, kind, yaw, q);
 
       // Instance tint: canopy/flower/rock palette blended at s.
       pickTint(s, kind, r, tint);
 
-      q.setFromEuler(eul.set(0, yaw, 0));
-      m.compose(
-        vec.set(worldP.x - anchor.x, y - 0.12, worldP.z - anchor.z),
-        q,
-        tmpScale.setScalar(scale),
-      );
+      m.compose(vec.set(worldP.x - anchor.x, y, worldP.z - anchor.z), q, tmpScale.setScalar(scale));
       nm.getNormalMatrix(m);
 
       const { pos, norm, baked, shade, mask, vertexCount, radius } = proto;
