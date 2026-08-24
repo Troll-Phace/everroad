@@ -15,6 +15,8 @@ the generated module.
 
 ## [Unreleased]
 
+## [0.1.19] - 2026-08-24
+
 ### Fixed
 
 - **The desktop game looks right with the internet switched off.** EverRoad's
@@ -36,12 +38,10 @@ the generated module.
   read it, with no rummaging required. If it cannot set that save aside, it
   stops saving altogether for the session, and New Journey will not erase it —
   nothing can be written over the journey it is protecting.
-
 - **The weather on the title screen now belongs to the road it is falling on.**
   Every time the menu picks a fresh car, a fresh stretch of country and a fresh
   hour of the day, it draws fresh weather to go with it — so leaves no longer
   drift down over pine ridges or marshland that never had a leaf to shed.
-
 - **The country stops crumpling on the sharpest bends.** Sweep hard through a
   tight corner and the hills out on the inside used to crease and stack over
   themselves, with the odd tree left standing on a fold of land instead of on
@@ -248,4 +248,4 @@ the generated module.
 - A generative audio engine, the HUD and panel overlay, and a save system that
   keeps earning while you are away.
 
-[Unreleased]: https://github.com/Troll-Phace/everroad/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/Troll-Phace/everroad/compare/v0.1.19...HEAD
