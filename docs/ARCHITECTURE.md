@@ -960,7 +960,7 @@ them live.
 
 | Command | Does |
 |---------|------|
-| `npm run dev` | Vite dev server (the `.claude/launch.json` config pins port 5199) |
+| `npm run dev` | Vite dev server (`vite.config.ts` pins port 5199, strict) |
 | `npm run typecheck` | `tsc --noEmit` — the lint gate |
 | `npm test` | Vitest in watch mode |
 | `npm run test:run` | Vitest once |

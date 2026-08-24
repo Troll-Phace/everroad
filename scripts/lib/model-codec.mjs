@@ -223,6 +223,24 @@ function validateCarMeta(doc) {
       if (!suffixes.includes(s)) fail(doc.name, `missing wheel "*_${s}" (need ${WHEEL_SUFFIXES})`);
     }
     if (meta.wheelRadius <= 0) fail(doc.name, 'a wheeled car needs a positive meta.wheelRadius');
+    // animateCar spins a wheel at speedMps / meta.wheelRadius, so a tyre resized
+    // in the recipe without touching evr.car(wheel_radius=...) desynchronises the
+    // roll from the ground and still passes every other gate. Measure the tyre
+    // rather than trusting the declaration: wheel positions are pivot-relative
+    // and the axle is X, so the radius is the reach in Y/Z.
+    for (const wheel of wheels) {
+      let measured = 0;
+      for (const p of wheel.positions) {
+        measured = Math.max(measured, Math.abs(p[1]), Math.abs(p[2]));
+      }
+      if (Math.abs(measured - meta.wheelRadius) > 0.005) {
+        fail(
+          doc.name,
+          `wheel "${wheel.name}" measures ${measured.toFixed(3)} m but meta.wheelRadius ` +
+            `is ${meta.wheelRadius} — wheel spin would not match ground speed`,
+        );
+      }
+    }
   }
   for (const hub of hubs) {
     const suffix = hub.name.split('_').pop();
