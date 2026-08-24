@@ -15,6 +15,8 @@ the generated module.
 
 ## [Unreleased]
 
+## [0.1.18] - 2026-08-24
+
 ### Added
 
 - **Everroad updates itself.** The desktop app checks for a newer release when
@@ -212,4 +214,4 @@ the generated module.
 - A generative audio engine, the HUD and panel overlay, and a save system that
   keeps earning while you are away.
 
-[Unreleased]: https://github.com/Troll-Phace/everroad/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/Troll-Phace/everroad/compare/v0.1.18...HEAD
