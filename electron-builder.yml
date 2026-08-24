@@ -7,7 +7,12 @@
 # the two files in electron/. Nothing here is a second copy of the game.
 
 appId: com.trollphace.everroad
-productName: EverRoad
+# The game is spelled "EverRoad" everywhere a human reads it, but productName is
+# an identity, not a label: Electron derives userData from it, and it feeds
+# artifactName below. Recapitalising it would move every existing desktop
+# install's save directory and rename the release artifacts mid-line. Left as
+# "Everroad" deliberately -- this is not a spelling that escaped the sweep.
+productName: Everroad
 copyright: Copyright © 2026 Troll-Phace
 
 directories:
