@@ -35,7 +35,16 @@ repro / done-criteria. Milestones are themed breakpoint tiers swept at natural
 roadmap breaks. At work-item boundaries, /milestone-review decides whether to
 sweep an open tier. Triage is part of closing: an item does not close with
 things in needs-triage — /triage-issues runs at the boundary alongside
-/milestone-review. Issues are closed by the user, not the agent.
+/milestone-review.
+
+You close issues yourself once a fix is confirmed — verified against the issue's
+stated done-criteria by `npm run verify` plus whatever direct check the issue
+calls for, not merely "the code changed". Close via `Closes #NN` in the commit,
+or `gh issue close NN` with a comment naming the commit and how it was verified.
+An issue whose done-criteria were only partially met stays open with a comment
+saying what is left; a done-criteria you deliberately declined stays open and
+gets the reason. Never close an issue you did not verify, and never close one to
+tidy the backlog.
 
 ## Git
 

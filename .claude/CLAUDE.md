@@ -51,6 +51,7 @@ failing or a finding is blocking and unresolvable.
 ## Conventions
 
 Commits: `type(scope): description` using the conventional prefixes; reference
-issues with `Refs #NN` (issues are closed by the user, so no `Closes`). Stage
-specific files. When you find a defect or debt you aren't fixing now, log it
+issues with `Closes #NN` when the commit fully satisfies the issue's
+done-criteria, `Refs #NN` when it only touches the issue. Stage specific
+files. When you find a defect or debt you aren't fixing now, log it
 (/log-issue) before moving on.
