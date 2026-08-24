@@ -152,6 +152,7 @@ src/
     chunks.ts          Chunk manager: road mesh, terrain ribbons, pooling
     scenery.ts         Instanced trees/rocks/flowers/props per biome
     biomes.ts          Biome visual definitions + blend sampling
+    farLand.ts         Camera-anchored distant land past the ribbon's edge
     sky.ts             Gradient sky dome, sun disc, stars, aurora
     sunShadow.ts       Sun shadow rig: light placement, ortho box, night gate
     weather.ts         Weather state machine + particles
@@ -416,12 +417,78 @@ rather than affine across a cell, which is exact near the road but drifts to
 ~28 cm past 120 m. Grounding scenery to the field instead of the mesh was the
 "floating trees" bug.
 
-The far field folds: the road's minimum radius of curvature is ~88 m while
-`TER_COLS` reaches ±165 m, so `1 - κ·lat` goes negative and the lateral mapping
-inverts on the tightest bends — around 0.7% of cells past |lat| 90 and 6% past
-150. `sampleTerrainMesh` flags those samples `folded` and callers decline to
-use the normal, because its slope direction is mirrored. The underlying
-crumpled geometry is a real defect in the terrain ribbon, tracked separately.
+The far field folds. `RoadPath.curvature` is a closed-form sum of four sines,
+so the radius is exactly `1 / |κ(s)|` and the tightest possible bend is the
+analytic bound `1 / (0.0042 + 0.0035 + 0.0028 + 0.0009)` = **87.7 m** — well
+inside the ±165 m `TER_COLS` reaches, so `1 - κ·lat` goes negative and the
+lateral mapping inverts. A cell folds exactly when `|lat| >= R`.
+
+Rates depend on which measure you use, so name it. Counting **terrain cells**
+— a cell folds when the outer of its two `TER_COLS` columns exceeds R, which is
+what actually crumples — over the first 102 km: **0% inside |lat| 90, 3.96% at
+90-120, 17.15% at 120-165**. Measured instead as the fraction of continuous
+lateral extent with `|lat| >= R`, the same road gives 0% / 2.1% / 11.3%; both
+are defensible, they are not the same number, and a reader who applies the
+`|lat| >= R` rule to a figure computed the other way will not reproduce it.
+
+Either way the global average badly understates the places it matters. At the
+tightest bend in the first 102 km (**s = 99129, R = 91.3 m**) the local
+cell rates are **0% inside 90, but 100% at 90-120 and 100% beyond 120** — the
+entire outer field is inverted. **63** of 1700 chunks over 102 km are tighter
+than R 110. Quote the local figures, not the global ones, and derive them: the
+curvature is closed-form, so any of these numbers can be recomputed exactly
+rather than sampled.
+
+A caution learned the hard way: s ≈ 24.6 km is a nearly *straight* stretch
+(R = 1928 m, zero folded cells) and has twice been mistaken for a tight bend in
+this project's measurements. Check `1 / |κ(s)|` before calling any location
+tight.
+
+Where the ribbon folds it also stacks: up to **19 terrain triangles cover a
+single XZ point**. `sampleTerrainMesh` grounds a prop to its own flap correctly
+— the sampler is not at fault, and replacing its parametric fallback with a
+nearest-triangle clamp returns byte-identical results — but a *different* flap
+may be drawn above it, so the prop can be buried or left hanging. On the 12
+tightest chunks, 4.10% of samples in the |lat| 90-120 band are more than 0.25 m
+off the topmost drawn surface, worst case 2.80 m. Every other band at every
+other curvature is exactly 0. `sampleTerrainMesh` also flags folded samples
+`folded` so callers decline to lean props along a mirrored normal. All of this
+is mitigation: the crumpled geometry is a real defect, tracked separately.
+
+The ribbon cannot simply be widened to cover more ground — `TER_COLS` at ±420
+folds catastrophically, a flat plane over the lower half of the frame, because
+the lateral extent needed far exceeds the minimum turn radius. Anything that
+must fill beyond the ribbon belongs in world space, not path space.
+
+The ribbon also simply *ends* at ±165 m, and a near-horizontal sight line runs
+out over the fields, leaves it a metre or two above the surface and finds
+nothing beyond — sky under the canopies on the horizon. `world/farLand.ts`
+fills that: a radial fan anchored to the camera in **world space**, never in
+path space, so nothing about it follows the road curve and nothing can fold.
+It writes no depth and draws before every world mesh, so terrain and scenery
+always paint over it and there is no seam to z-fight. It is ordered at -9.5:
+after the sky dome, which it covers, but ahead of the sun and moon discs,
+which it must not — `GodRaysEffect` makes the sun's material transparent, so
+at medium and high the disc draws over the fan anyway, but on `quality: low`
+the effect is never built and a fan ordered after the disc erases it through
+the whole golden hour. That asymmetry between quality tiers is exactly the
+kind of bug a mid-quality playtest cannot see.
+
+Its elevation rises monotonically with radius, from 10° below the eye at
+120 m — inside the ribbon on every side, so real terrain always buries the
+inner rim — to a ridge that is a **floor of 7.6° with the wander folded
+upward**, occupying [7.6°, 9.0°] and never dipping below the floor at any
+azimuth. That one-sidedness is the guarantee and must not be "simplified"
+into a symmetric ±wander: the fan closes every gap below its silhouette and
+none above, so a symmetric wander dips below the floor on part of the circle
+and closure becomes a coincidence of azimuth. The floor is set by curvature —
+the tighter the bend, the nearer the ribbon edge on its outside and the higher
+its silhouette. On a straight the land silhouette tops out near 5.5°; at the
+road's tightest bends (R 92.4 at s ~21.1 km, R 91.3 at s ~99.1 km, R 88.7 at
+s ~431.6 km) it reaches 6.64°. Enclosed-sky pixels on a 1280x800 mask go from
+200 to 0 at the sunflower-coast repro and from 3500-6500 to 0, terrain-only,
+at those bends. The residual at folded bends is sky beneath *airborne
+scenery*, which no horizon height can close — see §5.3's fold note.
 
 Dash bleed at chunk seams and terrain winding after an axis flip have both been
 bugs here (commits `2a3856d`, `ebbdbe9`). New geometry work in this file should
