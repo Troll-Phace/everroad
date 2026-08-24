@@ -17,7 +17,9 @@ import { prestigePanel } from './panelPrestige';
 import { settingsPanel } from './panelSettings';
 import { trophiesPanel } from './panelTrophies';
 import { upgradesPanel } from './panelUpgrades';
+import { UPDATE_PANEL_ID, updatePanel } from './panelUpdate';
 import { WHATS_NEW_PANEL_ID, whatsNewPanel } from './panelWhatsNew';
+import { checkOnLaunch } from './update';
 import { createModeTransition } from './transition';
 
 export function initUI(deps: UIDeps): void {
@@ -44,12 +46,20 @@ export function initUI(deps: UIDeps): void {
   panels.register(settingsPanel(deps, panels, effects, transition));
   panels.register(helpPanel());
   panels.register(whatsNewPanel());
+  panels.register(updatePanel());
 
   const menu = initMainMenu(deps, root, {
     transition,
     openSettings: () => panels.open('settings'),
     openWhatsNew: () => panels.open(WHATS_NEW_PANEL_ID),
+    openUpdate: () => panels.open(UPDATE_PANEL_ID),
   });
+
+  // The one network request Everroad makes, and only in the desktop build: ask
+  // the release feed whether anything newer exists. Fired once, here, on the
+  // way up — the main process never checks on its own, so the preference in
+  // Settings is the whole story (src/ui/update.ts).
+  checkOnLaunch();
 
   // ---- keyboard -----------------------------------------------------------
   const keyToPanel: Record<string, string> = {

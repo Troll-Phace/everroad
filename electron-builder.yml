@@ -17,16 +17,23 @@ directories:
   # sizes from build/icon.png; see scripts/build-icon.mjs.
   buildResources: build
 
-# An explicit whitelist. node_modules is excluded because nothing in the
-# packaged app requires it: Vite has already bundled three and postprocessing
-# into dist/, and electron/*.cjs pulls in nothing but `electron` and Node
-# built-ins. That keeps the app around the size of the bundle rather than the
-# size of the checkout.
+# An explicit whitelist, plus whatever electron-builder adds for production
+# dependencies.
+#
+# node_modules used to be excluded outright, because nothing in the packaged app
+# required it. The updater changed that: `electron/updater.cjs` requires
+# `electron-updater`, which is real runtime code in the main process and has to
+# ship. So the blanket exclusion is gone and `dependencies` in package.json is
+# now load-bearing — electron-builder packages exactly what is listed there.
+#
+# Which is why `three` and `postprocessing` moved to devDependencies. Vite
+# inlines both into dist/ at build time; for the *packaged app* they are build
+# tooling, and leaving them under `dependencies` would have shipped a second,
+# unreferenced copy of Three.js inside every download.
 files:
   - dist/**/*
   - electron/**/*
   - package.json
-  - '!node_modules'
 
 # No native modules, so there is nothing to rebuild against Electron's headers.
 npmRebuild: false

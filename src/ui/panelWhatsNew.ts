@@ -19,6 +19,7 @@ import { APP_VERSION } from '../version/version';
 import { CHANGELOG } from '../version/changelog.generated';
 import type { ChangelogRelease } from '../version/changelog.generated';
 import { el } from './dom';
+import { appendInline } from './markdown';
 import type { PanelDef } from './panels';
 
 /** Panel id, also the value written to `document.body.dataset.panel`. */
@@ -26,28 +27,6 @@ export const WHATS_NEW_PANEL_ID = 'whatsnew';
 
 /** localStorage key for the last version whose notes were opened. See `markSeen`. */
 const SEEN_KEY = 'everroad-seen-version';
-
-/**
- * Renders a changelog bullet into `parent`, turning `**bold**` into `<strong>`
- * and leaving every other character literal.
- *
- * Built node by node out of text nodes — never `innerHTML`. The changelog is
- * repository content rather than player input, but a rendering path that
- * parses markup is a rendering path that can be made to parse the wrong markup,
- * and there is no reason for this one to exist.
- */
-function appendInline(parent: HTMLElement, text: string): void {
-  const bold = /\*\*(.+?)\*\*/g;
-  let at = 0;
-  for (let m = bold.exec(text); m !== null; m = bold.exec(text)) {
-    if (m.index > at) parent.append(document.createTextNode(text.slice(at, m.index)));
-    parent.append(el('strong', 'whatsnew-strong', m[1]));
-    at = m.index + m[0].length;
-  }
-  // Anything after the last pair — including an unmatched `**`, which stays
-  // literal rather than being guessed at.
-  if (at < text.length) parent.append(document.createTextNode(text.slice(at)));
-}
 
 /** One release: a disclosure button plus the body it controls. */
 function releaseBlock(release: ChangelogRelease, index: number, expanded: boolean): HTMLElement {
