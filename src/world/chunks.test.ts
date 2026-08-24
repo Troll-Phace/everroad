@@ -4,6 +4,8 @@ import { RoadPath } from './roadPath';
 import {
   CHUNK_LEN,
   ChunkManager,
+  MENU_BEHIND,
+  PLAY_BEHIND,
   SLOPE_FOLLOW,
   TER_COLS,
   TER_ROW_STEP,
@@ -386,6 +388,49 @@ describe('ChunkManager world layout', () => {
     const a = obstaclesOf(build(), 2);
     const b = obstaclesOf(build(), 2);
     expect(a).toEqual(b);
+  });
+});
+
+describe('ChunkManager.setBehind', () => {
+  /** How many chunks the manager is holding, whatever their indices. */
+  function live(cm: ChunkManager): number {
+    return cm.root.children.length;
+  }
+
+  function at(behind: number, carS: number): ChunkManager {
+    const cm = new ChunkManager(new RoadPath(1337), new THREE.Scene());
+    cm.setBehind(behind);
+    cm.update(carS);
+    return cm;
+  }
+
+  it('drives how far the ribbon reaches back from the car', () => {
+    const carS = 40 * CHUNK_LEN;
+    const grew = live(at(MENU_BEHIND, carS)) - live(at(PLAY_BEHIND, carS));
+    expect(grew).toBe(MENU_BEHIND - PLAY_BEHIND);
+    expect(at(MENU_BEHIND, carS).behind).toBe(MENU_BEHIND);
+  });
+
+  /**
+   * Attract mode grows the tail and gameplay hands it straight back, so the
+   * shrink has to recycle rather than leave the extra chunks stranded in the
+   * scene graph paying for themselves every frame.
+   */
+  it('recycles the extra chunks when the tail is handed back', () => {
+    const carS = 40 * CHUNK_LEN;
+    const cm = at(MENU_BEHIND, carS);
+    cm.setBehind(PLAY_BEHIND);
+    cm.update(carS);
+    expect(live(cm)).toBe(live(at(PLAY_BEHIND, carS)));
+  });
+
+  /** Driving is the floor: nothing may shorten the tail under it. */
+  it('never goes under the driving tail', () => {
+    const cm = new ChunkManager(new RoadPath(1337), new THREE.Scene());
+    cm.setBehind(0);
+    expect(cm.behind).toBe(PLAY_BEHIND);
+    cm.setBehind(-5);
+    expect(cm.behind).toBe(PLAY_BEHIND);
   });
 });
 

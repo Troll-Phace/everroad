@@ -15,6 +15,15 @@ the generated module.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The world no longer runs out behind you on the title screen.** The menu's
+  camera likes to stand down the road and look back at the car, and from there
+  you could see the countryside stop dead — a stepped cliff a couple of hundred
+  metres back, with fenceposts and hay bales stranded on its lip. The road now
+  keeps going far enough behind the car that the end of it stays out in the
+  haze where it belongs.
+
 ### Changed
 
 - The road signs got repainted: the game is **EverRoad**, with a capital R,

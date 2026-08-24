@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import * as THREE from 'three';
 import {
+  MENU_MAX_LEAD,
+  MENU_SAFE_DISTANCE,
   MENU_SHOTS,
   MIN_TERRAIN_CLEARANCE,
   MenuCamera,
@@ -8,7 +10,7 @@ import {
   type MenuShotId,
 } from './menuCamera';
 import { RoadPath } from './roadPath';
-import { terrainMeshHeight } from './chunks';
+import { CHUNK_LEN, MENU_BEHIND, PLAY_BEHIND, TER_COLS, terrainMeshHeight } from './chunks';
 
 /**
  * The shot director is testable without a renderer: it writes to a
@@ -389,5 +391,85 @@ describe('floating-origin rebase', () => {
       const offsetAfter = c.position.clone().sub(car.root.position);
       expect(offsetAfter.distanceTo(offsetBefore)).toBeLessThan(1);
     }
+  });
+});
+
+describe('the ribbon\u2019s rear boundary', () => {
+  /**
+   * The menu is the only rig that looks back down the road, so it is the only
+   * one that can see where the world stops. `MENU_BEHIND` is what buys the
+   * distance and `MENU_SAFE_DISTANCE` is what the fog needs; neither number
+   * means anything without the other, so they are checked as a pair.
+   */
+  it('is far enough back that no eye riding with the car can reach it', () => {
+    expect(MENU_BEHIND * CHUNK_LEN).toBeGreaterThanOrEqual(MENU_SAFE_DISTANCE);
+  });
+
+  /**
+   * Sweep every shot and report the closest point of the ribbon's rear cut
+   * that lands inside the frustum, for a ribbon retaining `behind` chunks.
+   * `Infinity` means the cut never came into shot at all.
+   */
+  function nearestCutInShot(behind: number): { seen: number; nearest: number } {
+    const path = new RoadPath(20260824);
+    const frustum = new THREE.Frustum();
+    const m = new THREE.Matrix4();
+    const edge = new THREE.Vector3();
+    let seen = 0;
+    let nearest = Infinity;
+    for (let i = 0; i < MENU_SHOTS.length; i++) {
+      const c = camera();
+      const car = new FakeCar(path, 4200, 2.1, 30);
+      const cam = new MenuCamera(c, path, pickShot(i));
+      for (let f = 0; f < 300; f++) {
+        car.advance(1 / 60);
+        cam.update(car, 1 / 60);
+        if (cam.shotId !== MENU_SHOTS[i].id) break;
+        c.updateMatrixWorld(true);
+        m.multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse);
+        frustum.setFromProjectionMatrix(m);
+        // Where ChunkManager.update would have cut the ribbon this frame.
+        const sCut = (Math.floor(car.s / CHUNK_LEN) - behind) * CHUNK_LEN;
+        for (let lat = TER_COLS[0]; lat <= TER_COLS[TER_COLS.length - 1]; lat += 15) {
+          path.point(sCut, lat, edge);
+          edge.y = terrainMeshHeight(path, sCut, lat);
+          if (!frustum.containsPoint(edge)) continue;
+          seen++;
+          nearest = Math.min(nearest, c.position.distanceTo(edge));
+        }
+      }
+    }
+    return { seen, nearest };
+  }
+
+  /**
+   * The defect this pair of numbers exists for. At the driving tail the shots
+   * that stand ahead of the car frame the cut from ~200 m, where `FogExp2`
+   * still leaves most of its contrast and it reads as a stepped cliff. Kept as
+   * a test rather than a comment so the sweep above is known to be able to see
+   * a boundary at all — a silent zero would make the next case vacuous.
+   */
+  it('was in shot, and close, at the driving tail', () => {
+    const { seen, nearest } = nearestCutInShot(PLAY_BEHIND);
+    expect(seen).toBeGreaterThan(0);
+    expect(nearest).toBeLessThan(MENU_SAFE_DISTANCE);
+  });
+
+  /** And with the menu's tail, nothing the fog cannot finish. */
+  it('is never in shot nearer than the fog can hide it', () => {
+    expect(nearestCutInShot(MENU_BEHIND).nearest).toBeGreaterThanOrEqual(MENU_SAFE_DISTANCE);
+  });
+
+  /**
+   * `roadsideStatic` is the shot that reaches furthest forward, and its lead
+   * is what sets how far back the boundary has to sit. A raise here without a
+   * matching raise of `MENU_BEHIND` puts the cut back on screen.
+   */
+  it('clears the furthest vantage any shot may take', () => {
+    const path = new RoadPath(7);
+    const cam = new MenuCamera(camera(), path, pickShot(MENU_SHOTS.findIndex((s) => s.anchored)));
+    const car = new FakeCar(path, 3000, 2.1, 60);
+    cam.update(car, 1 / 60);
+    expect(cam.camS - car.s).toBeLessThanOrEqual(MENU_MAX_LEAD);
   });
 });
