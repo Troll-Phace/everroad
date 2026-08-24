@@ -105,7 +105,7 @@ an issue when it actually hurts, not built speculatively.
 ### 2.4 Presentation — shipped
 
 - Generative Web Audio soundtrack: biome-keyed pad chords, wind chimes,
-  engine bed, wind, birds, crickets, rain, thunder, aurora shimmer, and UI
+  engine bed, wind, birds, crickets, rain, thunder, and UI
   one-shots.
 - Glassy overlay HUD and six panels, retinted per biome.
 - Toasts, biome-change banner, offline-summary modal, prestige flash.
@@ -878,8 +878,7 @@ Two buses into a master compressor (threshold −20 dB, ratio 3:1):
 
 - **Music bus** — pad chords (per chord tone: a triangle detuned flat plus a
   sine detuned sharp, plus a sub sine an octave below the root, through a
-  lowpass breathing on a 0.06 Hz LFO), wind chimes with a feedback delay, and
-  the aurora shimmer.
+  lowpass breathing on a 0.06 Hz LFO) and wind chimes with a feedback delay.
 - **SFX bus** — engine rumble (brown noise through a lowpass that tracks
   speed), the drift tire layer, wind, rain, birds, crickets, thunder, and all
   one-shots through an echo send.
