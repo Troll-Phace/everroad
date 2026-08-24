@@ -1,0 +1,49 @@
+MIT License
+
+Copyright (c) 2026 Troll-Phace
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+
+---
+
+## Third-party notices
+
+The MIT licence above covers EverRoad's own source, assets and documentation.
+It does not cover the following bundled third-party works, which are
+redistributed under their own terms.
+
+### Fonts — SIL Open Font License 1.1
+
+EverRoad bundles two typefaces so that the game renders in its intended faces
+without a network connection. Both are licensed under the SIL Open Font License
+version 1.1, not MIT:
+
+  * **Quicksand** — Copyright 2011 The Quicksand Project Authors
+    (https://github.com/andrew-paglinawan/QuicksandFamily),
+    with Reserved Font Name "Quicksand".
+  * **JetBrains Mono** — Copyright 2020 The JetBrains Mono Project Authors
+    (https://github.com/JetBrains/JetBrainsMono).
+
+The complete OFL 1.1 text for each is distributed with the fonts, in
+`public/fonts/` in the source tree and `fonts/` in every packaged build:
+`Quicksand-OFL.txt` and `JetBrainsMono-OFL.txt`.
+
+Note the Reserved Font Name on Quicksand: a modified version of that font may
+not be distributed under the name "Quicksand".

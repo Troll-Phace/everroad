@@ -155,6 +155,12 @@ export const BIOME_LEN = 2700;
 /** Meters of crossfade at each boundary. */
 export const BLEND_LEN = 520;
 
+/** One biome's share of the blend at a sampled point. */
+export interface BiomeWeight {
+  id: BiomeId;
+  w: number;
+}
+
 export interface BiomeSample {
   /** Dominant biome. */
   id: BiomeId;
@@ -162,11 +168,46 @@ export interface BiomeSample {
   /** 0..1 progress of blend into `next` (0 = fully `id`). */
   blend: number;
   /** Sparse weights over all biomes (sums to 1; at most 2 nonzero). */
-  weights: Array<{ id: BiomeId; w: number }>;
+  weights: BiomeWeight[];
 }
 
-/** Sample biome weights at path distance s (meters). */
-export function biomeAt(s: number): BiomeSample {
+/**
+ * A `BiomeSample` a caller can own and hand to `biomeAt` as an out-param.
+ *
+ * `biomeAt` is called several times a frame and the frame loop holds a zero
+ * steady-state allocation budget (docs/ARCHITECTURE.md §14), so the sample is
+ * written in place rather than built fresh. Any caller that *keeps* the result
+ * past its own statement must pass a sample of its own — the module-level
+ * default is scratch and the next call overwrites it.
+ */
+export function createBiomeSample(): BiomeSample {
+  return {
+    id: BIOME_ORDER[0],
+    next: BIOME_ORDER[0],
+    blend: 0,
+    weights: [{ id: BIOME_ORDER[0], w: 1 }],
+  };
+}
+
+/**
+ * Scratch for this module's own helpers. Deliberately *not* `defaultSample`:
+ * `blendColor`/`blendNumber`/`pickScenery` are called from the middle of frame
+ * code that may be holding a `biomeAt(s)` result, and clobbering it from under
+ * that caller is exactly the aliasing bug the out-param is meant to avoid.
+ * These three never nest inside one another, so one scratch serves all of them.
+ */
+const helperSample = createBiomeSample();
+
+/**
+ * Sample biome weights at path distance s (meters), written into `out`.
+ *
+ * `out` is mandatory on purpose. A shared default scratch made the safe use
+ * (`biomeAt(s).id`, read immediately) indistinguishable from the unsafe one
+ * (holding the sample across another call that refills it), and the difference
+ * is invisible at the call site. Requiring the caller to own its scratch —
+ * from `createBiomeSample()` — turns that invariant into a compile error.
+ */
+export function biomeAt(s: number, out: BiomeSample): BiomeSample {
   const n = BIOME_ORDER.length;
   const cycle = (((s / BIOME_LEN) % n) + n) % n;
   const idx = Math.floor(cycle);
@@ -182,15 +223,26 @@ export function biomeAt(s: number): BiomeSample {
     blend = t * t * (3 - 2 * t); // smoothstep
   }
 
-  const weights: Array<{ id: BiomeId; w: number }> =
-    blend <= 0
-      ? [{ id: cur, w: 1 }]
-      : [
-          { id: cur, w: 1 - blend },
-          { id: nxt, w: blend },
-        ];
+  // Entry objects are reused; only the 1 -> 2 growth at a crossfade's first
+  // frame ever allocates, and only once per sample per boundary.
+  const w = out.weights;
+  if (w.length === 0) w.push({ id: cur, w: 1 });
+  w[0].id = cur;
+  w[0].w = blend <= 0 ? 1 : 1 - blend;
+  if (blend <= 0) {
+    w.length = 1;
+  } else if (w.length < 2) {
+    w.push({ id: nxt, w: blend });
+  } else {
+    w.length = 2;
+    w[1].id = nxt;
+    w[1].w = blend;
+  }
 
-  return { id: blend > 0.5 ? nxt : cur, next: nxt, blend, weights };
+  out.id = blend > 0.5 ? nxt : cur;
+  out.next = nxt;
+  out.blend = blend;
+  return out;
 }
 
 const tmpA = new THREE.Color();
@@ -202,7 +254,7 @@ export function blendColor(
   pick: (b: BiomeVisual) => string,
   out: THREE.Color,
 ): THREE.Color {
-  const sample = biomeAt(s);
+  const sample = biomeAt(s, helperSample);
   out.set(0, 0, 0);
   for (const { id, w } of sample.weights) {
     tmpA.set(pick(BIOMES[id]));
@@ -213,7 +265,7 @@ export function blendColor(
 
 /** Blend a numeric per-biome field at s. */
 export function blendNumber(s: number, pick: (b: BiomeVisual) => number): number {
-  const sample = biomeAt(s);
+  const sample = biomeAt(s, helperSample);
   let v = 0;
   for (const { id, w } of sample.weights) v += pick(BIOMES[id]) * w;
   return v;
@@ -221,7 +273,7 @@ export function blendNumber(s: number, pick: (b: BiomeVisual) => number): number
 
 /** Pick a scenery kind at s using blended mix weights. */
 export function pickScenery(s: number, rand: number): SceneryKind {
-  const sample = biomeAt(s);
+  const sample = biomeAt(s, helperSample);
   const acc: Array<{ kind: SceneryKind; w: number }> = [];
   let total = 0;
   for (const { id, w } of sample.weights) {

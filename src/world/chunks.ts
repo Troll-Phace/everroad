@@ -1,6 +1,14 @@
 import * as THREE from 'three';
-import { RoadPath, DS } from './roadPath';
-import { BIOMES, biomeAt, blendColor, blendNumber, pickScenery, type SceneryKind } from './biomes';
+import { RoadPath, DS, foldSafeLateral } from './roadPath';
+import {
+  BIOMES,
+  biomeAt,
+  blendColor,
+  blendNumber,
+  createBiomeSample,
+  pickScenery,
+  type SceneryKind,
+} from './biomes';
 import { getProto } from './scenery';
 import { vertexToonMat, rng, noise2, jitterColor } from './materials';
 
@@ -61,9 +69,14 @@ function landHeight(roadY: number, s: number, lat: number): number {
  * Terrain height field in path space. This is the *analytic* surface, sampled
  * by the terrain mesh at its grid vertices — between them the drawn surface is
  * the flat triangle, so use `sampleTerrainMesh` to stand something on the land.
+ *
+ * The height is taken at the *effective* lateral — where `RoadPath.point`
+ * actually puts that column once the far-field compression has had its say —
+ * so the land keeps its features the size of the ground they sit on rather
+ * than piling a 165 m far-field rise onto a column that landed at 80 m.
  */
 export function terrainHeight(path: RoadPath, s: number, lat: number): number {
-  return landHeight(path.elevation(s), s, lat);
+  return landHeight(path.elevation(s), s, path.effectiveLateral(s, lat));
 }
 
 /** A point on the terrain as it is actually rendered. */
@@ -72,17 +85,11 @@ export interface TerrainSample {
   y: number;
   /** Unit face normal of the triangle under the point, always pointing up. */
   normal: THREE.Vector3;
-  /**
-   * True when the cell folded over itself in XZ, so `normal` was flipped back
-   * up and its slope DIRECTION is mirrored — meaningless, not merely noisy.
-   * Callers must not lean anything along it. See `fillFromTriangle`.
-   */
-  folded: boolean;
 }
 
 /** Allocate a reusable `TerrainSample` — sampling itself allocates nothing. */
 export function createTerrainSample(): TerrainSample {
-  return { y: 0, normal: new THREE.Vector3(0, 1, 0), folded: false };
+  return { y: 0, normal: new THREE.Vector3(0, 1, 0) };
 }
 
 // Cell corners for sampleTerrainMesh: 0 = (s0,l0) 1 = (s0,l1) 2 = (s1,l0)
@@ -128,11 +135,19 @@ export function sampleTerrainMesh(
 
   path.pose(s0, poseLo);
   path.pose(s1, poseHi);
-  fillCorner(0, poseLo, s0, l0);
-  fillCorner(1, poseLo, s0, l1);
-  fillCorner(2, poseHi, s1, l0);
-  fillCorner(3, poseHi, s1, l1);
-  path.point(s, l, queryP);
+  // Each row compresses its own far columns by its own curvature, exactly as
+  // buildTerrain does, so the cell walked here is the cell that was drawn.
+  // One curvature per row, not one per corner: this runs per prop.
+  const kLo = path.curvature(s0);
+  const kHi = path.curvature(s1);
+  fillCorner(0, poseLo, s0, foldSafeLateral(kLo, l0));
+  fillCorner(1, poseLo, s0, foldSafeLateral(kLo, l1));
+  fillCorner(2, poseHi, s1, foldSafeLateral(kHi, l0));
+  fillCorner(3, poseHi, s1, foldSafeLateral(kHi, l1));
+  // The query rides the curve *between* the two rows, so it needs the
+  // curvature at s and cannot borrow either row's. Three per sample is the
+  // floor here, not an oversight.
+  path.pointAtEffective(s, foldSafeLateral(path.curvature(s), l), queryP);
 
   // gridIndices emits (a,b,c) then (b,d,c), so the cell's diagonal runs from
   // the near row's far column to the far row's near column. Splitting the
@@ -140,9 +155,10 @@ export function sampleTerrainMesh(
   if (triangleAt(0, 1, 2, queryP.x, queryP.z, out)) return out;
   if (triangleAt(1, 3, 2, queryP.x, queryP.z, out)) return out;
 
-  // Far out on a tight curve the lateral mapping folds over itself and the
-  // point can land in neither triangle (measured at 0.008% of samples over
-  // 20 km, none inside |lat| 108). Fall back to the parametric split.
+  // The cell is planar in XZ while the query point rides the curve between the
+  // two rows, so a point a hair outside both triangles is possible on the
+  // sharpest cells. Fall back to the parametric split rather than return
+  // nothing. (Measured across 102 km this is now zero — see §5.3.)
   const u = (s - s0) / TER_ROW_STEP;
   const v = (l - l0) / (l1 - l0);
   if (u + v <= 1) fillFromTriangle(0, 1, 2, 1 - u - v, v, u, out);
@@ -157,6 +173,7 @@ export function terrainMeshHeight(path: RoadPath, s: number, lat: number): numbe
   return sampleTerrainMesh(path, s, lat, sharedSample).y;
 }
 
+/** One cell corner. `lat` is the *effective* lateral, already compressed. */
 function fillCorner(
   i: number,
   pose: { pos: THREE.Vector3; heading: number },
@@ -216,22 +233,14 @@ function fillFromTriangle(
   const len = out.normal.length();
   if (len < 1e-9) {
     out.normal.set(0, 1, 0);
-    out.folded = false;
     return;
   }
   out.normal.divideScalar(len);
-  // A cell whose lateral mapping inverted (the road's minimum radius of
-  // curvature is ~88 m while TER_COLS reaches ±165 m, so the far field folds
-  // on tight bends: ~0.7% of cells past |lat| 90, ~6% past 150) winds
-  // backwards and crosses downward. Flip it up so the value is at least
-  // usable as a surface, but flag it — the slope it describes points the
-  // wrong way, so leaning a prop along it tilts it the wrong way.
-  if (out.normal.y < 0) {
-    out.normal.negate();
-    out.folded = true;
-  } else {
-    out.folded = false;
-  }
+  // The lateral map can no longer invert (RoadPath.foldSafeLateral), so a cell
+  // always winds the same way and the normal always comes out up. The flip is
+  // kept as a floor under floating-point noise on a near-degenerate cell, not
+  // as a fold workaround: there is nothing left to flag.
+  if (out.normal.y < 0) out.normal.negate();
 }
 
 /**
@@ -258,8 +267,8 @@ export const SLOPE_FOLLOW: Record<SceneryKind, number> = {
 };
 /**
  * Ceiling on the face angle a prop will answer to, in radians (~29°). Real
- * land tops out near 26°; anything steeper is the far-field cell fold, and
- * without the cap a prop out there would lie down.
+ * land tops out near 26°; the cap is what keeps a prop upright on the steepest
+ * cell the height field can produce instead of laying it down.
  */
 const MAX_TILT = 0.5;
 /** Sink for a prop lying flush with the face — just enough to kill the seam. */
@@ -315,8 +324,7 @@ export function groundProp(
   outQuat: THREE.Quaternion,
 ): number {
   sampleTerrainMesh(path, s, lat, groundSample);
-  // Stand upright rather than lean the wrong way on a folded cell.
-  const follow = groundSample.folded ? 0 : SLOPE_FOLLOW[kind];
+  const follow = SLOPE_FOLLOW[kind];
   propOrientation(yaw, groundSample.normal, follow, outQuat);
   return groundSample.y - THREE.MathUtils.lerp(SINK_UPRIGHT, SINK_FLUSH, follow);
 }
@@ -453,9 +461,14 @@ export class ChunkManager {
 
     for (let r = 0; r < rows; r++) {
       const s = s0 + r * DS;
+      // One curvature per row rather than one per column. The road never gets
+      // near the fold — |k| <= 1/87.7 and ROAD_COLS stops at 5.5 m — but going
+      // through foldSafeLateral rather than assuming that keeps this correct
+      // if the cross-section ever widens.
+      const kappa = this.path.curvature(s);
       const dashOn = Math.floor(s / 4) % 2 === 0;
       for (let j = 0; j < cols; j++) {
-        this.path.point(s, ROAD_COLS[j], p);
+        this.path.pointAtEffective(s, foldSafeLateral(kappa, ROAD_COLS[j]), p);
         const k = (r * cols + j) * 3;
         pos[k] = p.x - anchor.x;
         pos[k + 1] = p.y + 0.02;
@@ -496,11 +509,15 @@ export class ChunkManager {
     for (let r = 0; r < rows; r++) {
       const s = s0 + r * TER_ROW_STEP;
       const roadY = this.path.elevation(s);
+      const kappa = this.path.curvature(s);
       blendColor(s, (b) => b.ground, ground);
       blendColor(s, (b) => b.groundAlt, groundAlt);
       for (let j = 0; j < cols; j++) {
-        const lat = TER_COLS[j];
-        this.path.point(s, lat, p);
+        // Where this column actually lands once the far field has been
+        // compressed away from the fold. Height and colour both key off it, so
+        // the land reads at the size of the ground it covers.
+        const lat = foldSafeLateral(kappa, TER_COLS[j]);
+        this.path.pointAtEffective(s, lat, p);
         const k = (r * cols + j) * 3;
         pos[k] = p.x - anchor.x;
         pos[k + 1] = landHeight(roadY, s, lat);
@@ -644,8 +661,15 @@ export class ChunkManager {
 
 const tmpScale = new THREE.Vector3();
 
+/**
+ * pickTint holds its sample across the `r()` draws below, so it owns one
+ * rather than reading the module-level scratch `biomeAt` hands back by
+ * default — anything else called in between would clobber it underneath us.
+ */
+const tintSample = createBiomeSample();
+
 function pickTint(s: number, kind: SceneryKind, r: () => number, out: THREE.Color): void {
-  const sample = biomeAt(s);
+  const sample = biomeAt(s, tintSample);
   // Choose a biome proportional to blend weights, then a palette entry.
   let pickRoll = r();
   let biome = BIOMES[sample.id];

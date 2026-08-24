@@ -51,7 +51,9 @@ const canvas = document.getElementById('viewer-canvas') as HTMLCanvasElement;
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
 renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+// Mirrors main.ts: PCFSoftShadowMap is deprecated in three r185 and falls back
+// to PCFShadowMap anyway, so this is the filter the game actually renders.
+renderer.shadowMap.type = THREE.PCFShadowMap;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#d2ecd2');

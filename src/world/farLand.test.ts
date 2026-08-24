@@ -15,7 +15,7 @@ import {
   farLandRadius,
 } from './farLand';
 import { CHUNK_LEN, TER_COLS } from './chunks';
-import { BIOMES, BIOME_LEN, BLEND_LEN, biomeAt, blendColor } from './biomes';
+import { BIOMES, BIOME_LEN, BLEND_LEN, biomeAt, blendColor, createBiomeSample } from './biomes';
 
 const AZIMUTHS = 720;
 const azimuth = (j: number): number => (j / AZIMUTHS) * Math.PI * 2;
@@ -223,7 +223,9 @@ describe('FarLand', () => {
     const { land } = rig();
     const mat = land.mesh.material as THREE.MeshToonMaterial;
     const s = BIOME_LEN - BLEND_LEN / 2;
-    const sample = biomeAt(s);
+    // Its own scratch, not a shared one: this sample is held across the
+    // `land.update` below, which samples biomes again through `blendColor`.
+    const sample = biomeAt(s, createBiomeSample());
     expect(sample.blend).toBeGreaterThan(0.1);
     expect(sample.blend).toBeLessThan(0.9);
     land.update(new THREE.Vector3(), s);

@@ -236,6 +236,17 @@ export interface SaveSummary {
   lastSaveTime: number;
 }
 
+/**
+ * What `saveGame` did with a write (docs/ARCHITECTURE.md §12). Anything other
+ * than `ok` means storage was left untouched:
+ * - `conflict` — another tab saved after this one loaded, so this tab's
+ *   snapshot is stale and writing it would erase the other tab's progress.
+ * - `locked` — this session refused a newer-build save it could not back up,
+ *   so it is not allowed to write over it.
+ * - `error` — storage itself threw (quota exhausted, private mode).
+ */
+export type SaveWriteResult = 'ok' | 'conflict' | 'locked' | 'error';
+
 // ---------------------------------------------------------------------------
 // Runtime state (NOT saved; lives for the session)
 // ---------------------------------------------------------------------------

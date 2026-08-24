@@ -89,6 +89,23 @@ gradient `#2b1e4e → #7a3b6e (45%) → #e8735a (80%) → #ffb26b`, title in
 | `--font-ui` | `'Quicksand', system-ui, sans-serif` |
 | `--font-mono` | `'JetBrains Mono', ui-monospace, monospace` |
 
+Both families ship **in the bundle**, from `src/fonts/` — the latin subset of
+the variable font, one woff2 per family, declared in `src/style.css` with a
+`font-weight` range and `font-display: swap`. Nothing is fetched from Google
+Fonts, so the desktop build renders in the intended faces with no network. The
+range is what the UI actually uses: Quicksand 400–700, JetBrains Mono 400–700.
+Reaching for a weight outside it clamps silently instead of failing loudly, so
+widen the `@font-face` range in the same commit as the design change.
+
+The mono 700 is worth knowing about: the old Google Fonts request only fetched
+400–600, so `.release-version` asked for 700 and silently matched down to 600.
+The variable file answers 700 at no extra cost, so that label now renders as it
+was authored.
+
+The fallbacks in the stacks above still matter — they are what covers the
+symbols neither family carries (`★ ⚙ ⚠ → ▸`) and every emoji in the biome,
+weather and trophy copy.
+
 `.mono` also sets `font-variant-numeric: tabular-nums` — every changing number
 (speed, coins, odometer, timers) uses it, so digits do not jitter the layout as
 they tick.

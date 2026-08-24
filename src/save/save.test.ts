@@ -7,6 +7,7 @@ import {
   importSave,
   loadGame,
   offlineSeconds,
+  resetSaveGuards,
   saveGame,
 } from './save';
 import { defaultState, defaultStats } from '../state';
@@ -47,6 +48,8 @@ interface FakeStorage {
   map: Map<string, string>;
   /** When set, setItem throws this for any key (quota exhausted / private mode). */
   throwOnSet: Error | null;
+  /** When set, setItem throws only for this key — a transient, key-specific failure. */
+  throwOnSetKey: string | null;
   /** When set, getItem throws this (storage access denied). */
   throwOnGet: Error | null;
   setCalls: string[];
@@ -56,7 +59,13 @@ let store: FakeStorage;
 let warn: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
-  store = { map: new Map(), throwOnSet: null, throwOnGet: null, setCalls: [] };
+  store = {
+    map: new Map(),
+    throwOnSet: null,
+    throwOnSetKey: null,
+    throwOnGet: null,
+    setCalls: [],
+  };
   const impl = {
     getItem(key: string): string | null {
       if (store.throwOnGet) throw store.throwOnGet;
@@ -65,6 +74,7 @@ beforeEach(() => {
     setItem(key: string, value: string): void {
       store.setCalls.push(key);
       if (store.throwOnSet) throw store.throwOnSet;
+      if (store.throwOnSetKey === key) throw new Error(`setItem failed for ${key}`);
       store.map.set(key, value);
     },
     removeItem(key: string): void {
@@ -76,6 +86,10 @@ beforeEach(() => {
   };
   vi.stubGlobal('localStorage', impl);
   warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+  // A tab's write guards (freshness baseline, write lock) live as long as the
+  // tab; a test file shares one module instance, so every case starts as a
+  // freshly-opened tab would.
+  resetSaveGuards();
 });
 
 afterEach(() => {
@@ -456,6 +470,92 @@ describe('importSave — hostile values', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Unknown top-level fields
+// ---------------------------------------------------------------------------
+
+/**
+ * hydrate strips a save to the known GameState keys (ARCHITECTURE.md §12).
+ * There is no forward-compat scratch space: an unknown top-level field is
+ * dropped on the way in rather than riding along in the live state and being
+ * written straight back out by the next autosave.
+ */
+describe('hydrate — unknown top-level fields', () => {
+  const KNOWN_KEYS = Object.keys(defaultState()).sort();
+
+  function craftedWithExtras(): string {
+    return craft((raw) => {
+      raw.cheatMode = true;
+      raw.futureFeature = { nested: [1, 2, 3] };
+      raw.coins = 1_000_000;
+    });
+  }
+
+  it('strips unknown keys from an imported save', () => {
+    const imported = importSave(encode(craftedWithExtras()))!;
+    expect(Object.keys(imported).sort()).toEqual(KNOWN_KEYS);
+    expect('cheatMode' in imported).toBe(false);
+    expect('futureFeature' in imported).toBe(false);
+  });
+
+  it('strips unknown keys on the loadGame path too', () => {
+    store.map.set(KEY, craftedWithExtras());
+    const loaded = loadGame()!;
+    expect(Object.keys(loaded).sort()).toEqual(KNOWN_KEYS);
+  });
+
+  it('does not write a stripped field back out on the next save', () => {
+    store.map.set(KEY, craftedWithExtras());
+    const loaded = loadGame()!;
+    expect(saveGame(loaded)).toBe('ok');
+    expect(Object.keys(JSON.parse(store.map.get(KEY)!)).sort()).toEqual(KNOWN_KEYS);
+  });
+
+  it('replaces a non-numeric lastSaveTime or createdTime with the defaults', () => {
+    // Both clocks feed the offline grant and the menu's "last driven" line, so
+    // hydrate checks their type rather than merely defaulting a missing one.
+    const json = craft((raw) => {
+      raw.lastSaveTime = 'yesterday';
+      raw.createdTime = null;
+    });
+    const imported = importSave(encode(json))!;
+    expect(Number.isFinite(imported.lastSaveTime)).toBe(true);
+    expect(Number.isFinite(imported.createdTime)).toBe(true);
+    expect(offlineSeconds(imported, imported.lastSaveTime + 30_000)).toBe(30);
+  });
+
+  it('replaces an infinite lastSaveTime rather than passing it through', () => {
+    const imported = importSave(encode('{"currencies":{"coins":1},"lastSaveTime":1e999}'))!;
+    expect(Number.isFinite(imported.lastSaveTime)).toBe(true);
+  });
+
+  it('replaces a non-string currentCarId with the starter', () => {
+    const json = craft((raw) => {
+      raw.currentCarId = 42;
+    });
+    const imported = importSave(encode(json))!;
+    expect(typeof imported.currentCarId).toBe('string');
+  });
+
+  it('replaces an ownedCars string before the catalog ever sees it', () => {
+    // A string has a truthy `.length` too, which is what used to let it
+    // through hydrate and reach the car catalog looking like a list of ids.
+    const json = craft((raw) => {
+      raw.ownedCars = 'rusty-hatch';
+    });
+    const imported = importSave(encode(json))!;
+    expect(Array.isArray(imported.ownedCars)).toBe(true);
+  });
+
+  it('keeps every known field while stripping the unknown ones', () => {
+    const state = populatedState();
+    const json = JSON.parse(JSON.stringify(state)) as Record<string, unknown>;
+    json.cheatMode = true;
+    const imported = importSave(encode(JSON.stringify(json)))!;
+    expect(imported).toEqual(state);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Forward-version guard
 // ---------------------------------------------------------------------------
 
@@ -532,6 +632,41 @@ describe('forward-version guard — loadGame', () => {
     expect(warn).toHaveBeenCalled();
   });
 
+  it('locks saving for the session when the backup write fails', () => {
+    // A transient, key-specific failure: the FUTURE_KEY write throws but the
+    // primary key is perfectly writable, so nothing else stops the fresh-start
+    // autosave from destroying the newer save. The lock does.
+    const raw = storeFuture();
+    store.throwOnSetKey = FUTURE_KEY;
+    expect(loadGame()).toBeNull();
+    expect(store.map.has(FUTURE_KEY)).toBe(false);
+
+    store.throwOnSetKey = null;
+    expect(saveGame(defaultState())).toBe('locked');
+    expect(store.map.get(KEY)).toBe(raw);
+  });
+
+  it('keeps saving locked for the rest of the session', () => {
+    const raw = storeFuture();
+    store.throwOnSetKey = FUTURE_KEY;
+    loadGame();
+    store.throwOnSetKey = null;
+    // Not a one-shot refusal: nothing this session may write over the save it
+    // could not protect, however many times it tries. The one way out is
+    // parking that save somewhere safe — see the clearSave suite below.
+    expect(saveGame(defaultState())).toBe('locked');
+    expect(saveGame(defaultState())).toBe('locked');
+    expect(saveGame(defaultState())).toBe('locked');
+    expect(store.map.get(KEY)).toBe(raw);
+  });
+
+  it('does not lock saving when the backup write succeeds', () => {
+    storeFuture();
+    loadGame();
+    expect(store.map.has(FUTURE_KEY)).toBe(true);
+    expect(saveGame(defaultState())).toBe('ok');
+  });
+
   it('keeps the newer-build backup across a clearSave', () => {
     // clearSave is "reset my progress", not "throw away the save this build
     // could not read" — the backup must survive so the newer build can recover.
@@ -554,6 +689,316 @@ describe('forward-version guard — loadGame', () => {
     const older = loadGame()!;
     expect(older.version).toBe(SAVE_VERSION);
     expect(older.currencies.coins).toBe(5);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Downgrade recovery (the -future backup is read back, not write-only)
+// ---------------------------------------------------------------------------
+
+describe('future-save recovery', () => {
+  /** Park a save under the backup key, as an older build's refusal would. */
+  function park(version: number, coins: number, lastSaveTime = 1_000): string {
+    const json = craft((raw) => {
+      raw.version = version;
+      raw.lastSaveTime = lastSaveTime;
+      (raw.currencies as Record<string, unknown>).coins = coins;
+    });
+    store.map.set(FUTURE_KEY, json);
+    return json;
+  }
+
+  /**
+   * The save the older build wrote after refusing the parked one. It carries
+   * that build's lower SAVE_VERSION, which is what marks it as the downgrade's
+   * fresh start — and it is always the *more recent* write, which is why
+   * recovery cannot be decided on save times.
+   */
+  function primary(coins: number, lastSaveTime = 2_000): string {
+    const json = craft((raw) => {
+      raw.version = SAVE_VERSION - 1;
+      raw.lastSaveTime = lastSaveTime;
+      (raw.currencies as Record<string, unknown>).coins = coins;
+    });
+    store.map.set(KEY, json);
+    return json;
+  }
+
+  it('loads the parked save once this build is new enough to read it', () => {
+    const parked = park(SAVE_VERSION, 777);
+    primary(3);
+    const loaded = loadGame()!;
+    expect(loaded.currencies.coins).toBe(777);
+    expect(store.map.get(KEY)).toBe(parked);
+  });
+
+  it('recovers when the primary key is empty', () => {
+    park(SAVE_VERSION, 512);
+    expect(loadGame()!.currencies.coins).toBe(512);
+    expect(store.map.has(FUTURE_KEY)).toBe(false);
+  });
+
+  it('swaps the displaced save into the backup key rather than deleting it', () => {
+    // The loss path this guards: play the newer build, downgrade, play the
+    // older build for a month, upgrade back. The month is displaced by the
+    // recovery — it must not be destroyed by it.
+    park(SAVE_VERSION, 777);
+    const month = primary(4321);
+    expect(loadGame()!.currencies.coins).toBe(777);
+    expect(store.map.get(FUTURE_KEY)).toBe(month);
+  });
+
+  it('does not recover a backup that is not newer than the primary', () => {
+    const parked = park(SAVE_VERSION, 777);
+    store.map.set(
+      KEY,
+      craft((raw) => {
+        raw.version = SAVE_VERSION;
+        (raw.currencies as Record<string, unknown>).coins = 3;
+      }),
+    );
+    expect(loadGame()!.currencies.coins).toBe(3);
+    expect(store.map.get(FUTURE_KEY)).toBe(parked);
+  });
+
+  it('is one-shot: the boot after a recovery is an ordinary load', () => {
+    park(SAVE_VERSION, 777);
+    primary(3);
+    loadGame();
+    // The swap left an older-version save under the backup key. The version
+    // rule is what stops it promoting itself straight back — no ping-pong.
+    resetSaveGuards();
+    expect(loadGame()!.currencies.coins).toBe(777);
+    resetSaveGuards();
+    expect(loadGame()!.currencies.coins).toBe(777);
+  });
+
+  it('leaves the parked save alone while it is still from the future', () => {
+    const parked = park(SAVE_VERSION + 1, 777);
+    primary(3);
+    expect(loadGame()!.currencies.coins).toBe(3);
+    expect(store.map.get(FUTURE_KEY)).toBe(parked);
+  });
+
+  it('does not touch the backup when the primary itself is from the future', () => {
+    // The newest save in storage has first claim on the backup slot.
+    const parked = park(SAVE_VERSION, 777);
+    store.map.set(
+      KEY,
+      craft((raw) => (raw.version = SAVE_VERSION + 1)),
+    );
+    expect(loadGame()).toBeNull();
+    expect(store.map.get(FUTURE_KEY)).not.toBe(parked);
+    expect(JSON.parse(store.map.get(FUTURE_KEY)!).version).toBe(SAVE_VERSION + 1);
+  });
+
+  it('still returns the recovered save when the promotion write fails', () => {
+    const parked = park(SAVE_VERSION, 777);
+    const older = primary(3);
+    store.throwOnSetKey = KEY;
+    const loaded = loadGame()!;
+    expect(loaded.currencies.coins).toBe(777);
+    // Nothing moved: the backup stays parked for the next boot to try again,
+    // the primary is untouched, and this session can still save.
+    expect(store.map.get(FUTURE_KEY)).toBe(parked);
+    expect(store.map.get(KEY)).toBe(older);
+    store.throwOnSetKey = null;
+    expect(saveGame(loaded)).toBe('ok');
+    expect(JSON.parse(store.map.get(KEY)!).currencies.coins).toBe(777);
+  });
+
+  it('does not re-promote when parking the displaced save fails', () => {
+    // The two writes are separate on purpose: the recovered save has already
+    // landed on the primary key, so the stale backup must not promote itself
+    // over it on every boot from here on.
+    const parked = park(SAVE_VERSION, 777);
+    primary(3);
+    store.throwOnSetKey = FUTURE_KEY;
+    expect(loadGame()!.currencies.coins).toBe(777);
+    expect(store.map.get(KEY)).toBe(parked);
+    expect(store.map.get(FUTURE_KEY)).toBe(parked);
+
+    store.throwOnSetKey = null;
+    resetSaveGuards();
+    const next = loadGame()!;
+    expect(next.currencies.coins).toBe(777);
+    expect(saveGame(next)).toBe('ok');
+  });
+
+  it('ignores a malformed backup', () => {
+    store.map.set(FUTURE_KEY, '{not json');
+    primary(3);
+    expect(loadGame()!.currencies.coins).toBe(3);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clearSave against a save this build cannot read
+// ---------------------------------------------------------------------------
+
+/**
+ * `hasSave()` is false for a future-version save, so the menu both disables
+ * Continue and skips the New Journey confirmation: one unconfirmed click lands
+ * on `clearSave` with the newest save in the world sitting under the primary
+ * key.
+ */
+describe('clearSave with a newer-build save stored', () => {
+  function storeFuture(): string {
+    const raw = craft((raw) => {
+      raw.version = SAVE_VERSION + 1;
+      (raw.currencies as Record<string, unknown>).coins = 777;
+    });
+    store.map.set(KEY, raw);
+    return raw;
+  }
+
+  it('parks the newer-build save before clearing it', () => {
+    const raw = storeFuture();
+    clearSave();
+    expect(store.map.has(KEY)).toBe(false);
+    expect(store.map.get(FUTURE_KEY)).toBe(raw);
+  });
+
+  it('releases the write lock once the save is parked', () => {
+    storeFuture();
+    store.throwOnSetKey = FUTURE_KEY;
+    loadGame();
+    expect(saveGame(defaultState())).toBe('locked');
+
+    // Storage recovered; New Journey now parks the save it could not protect
+    // at boot, and the session is free to write again.
+    store.throwOnSetKey = null;
+    clearSave();
+    expect(store.map.has(FUTURE_KEY)).toBe(true);
+    expect(saveGame(defaultState())).toBe('ok');
+  });
+
+  it('refuses to clear a newer-build save it cannot park', () => {
+    const raw = storeFuture();
+    store.throwOnSetKey = FUTURE_KEY;
+    clearSave();
+    expect(store.map.get(KEY)).toBe(raw);
+    expect(store.map.has(FUTURE_KEY)).toBe(false);
+    expect(warn).toHaveBeenCalled();
+  });
+
+  it('clears an ordinary save without parking anything', () => {
+    saveGame(defaultState());
+    clearSave();
+    expect(store.map.has(KEY)).toBe(false);
+    expect(store.map.has(FUTURE_KEY)).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Multi-tab write conflicts (#45)
+// ---------------------------------------------------------------------------
+
+describe('multi-tab write conflicts', () => {
+  /** A fresh module instance stands in for a freshly-opened tab: same
+   *  localStorage, its own freshness baseline. */
+  async function openTab(): Promise<typeof import('./save')> {
+    vi.resetModules();
+    return import('./save');
+  }
+
+  function seedSave(lastSaveTime: number, coins: number): void {
+    store.map.set(
+      KEY,
+      craft((raw) => {
+        raw.lastSaveTime = lastSaveTime;
+        (raw.currencies as Record<string, unknown>).coins = coins;
+      }),
+    );
+  }
+
+  const T0 = new Date('2026-03-01T12:00:00Z').getTime();
+
+  it("refuses a stale tab's write over the tab that has been playing", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    seedSave(T0, 100);
+
+    // Both tabs boot on the same 100-coin snapshot; Tab B sits on the menu.
+    const tabA = await openTab();
+    const stateA = tabA.loadGame()!;
+    const tabB = await openTab();
+    const stateB = tabB.loadGame()!;
+    expect(stateA.currencies.coins).toBe(100);
+    expect(stateB.currencies.coins).toBe(100);
+
+    // Tab A drives for five minutes and autosaves.
+    vi.setSystemTime(T0 + 300_000);
+    stateA.currencies.coins = 5000;
+    expect(tabA.saveGame(stateA)).toBe('ok');
+
+    // Tab B presses Continue; its first autosave carries the stale snapshot.
+    // This is the write that used to erase Tab A's five minutes.
+    vi.setSystemTime(T0 + 305_000);
+    expect(tabB.saveGame(stateB)).toBe('conflict');
+    const stored = JSON.parse(store.map.get(KEY)!);
+    expect(stored.currencies.coins).toBe(5000);
+    expect(stored.lastSaveTime).toBe(T0 + 300_000);
+    // A refused write does not stamp the caller either, so Tab B's offline
+    // accounting still points at the snapshot it actually loaded.
+    expect(stateB.lastSaveTime).toBe(T0);
+  });
+
+  it('keeps refusing the stale tab while the playing tab saves on', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    seedSave(T0, 100);
+    const tabA = await openTab();
+    const stateA = tabA.loadGame()!;
+    const tabB = await openTab();
+    const stateB = tabB.loadGame()!;
+
+    vi.setSystemTime(T0 + 10_000);
+    expect(tabA.saveGame(stateA)).toBe('ok');
+    vi.setSystemTime(T0 + 15_000);
+    expect(tabB.saveGame(stateB)).toBe('conflict');
+    vi.setSystemTime(T0 + 20_000);
+    expect(tabA.saveGame(stateA)).toBe('ok');
+    vi.setSystemTime(T0 + 25_000);
+    // Sticky: the losing tab's baseline can never catch up, so it stays out.
+    expect(tabB.saveGame(stateB)).toBe('conflict');
+  });
+
+  it('refuses when a save appears for a tab that booted on empty storage', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    const tabB = await openTab();
+    expect(tabB.loadGame()).toBeNull();
+
+    // Another tab starts a journey and writes the first save.
+    seedSave(T0 + 60_000, 250);
+    expect(tabB.saveGame(defaultState())).toBe('conflict');
+    expect(JSON.parse(store.map.get(KEY)!).currencies.coins).toBe(250);
+  });
+
+  it('leaves the ordinary single-tab rhythm alone', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    seedSave(T0, 100);
+    const tab = await openTab();
+    const state = tab.loadGame()!;
+    for (let i = 1; i <= 4; i++) {
+      vi.setSystemTime(T0 + i * 5_000);
+      state.currencies.coins += 10;
+      expect(tab.saveGame(state)).toBe('ok');
+    }
+    expect(JSON.parse(store.map.get(KEY)!).currencies.coins).toBe(140);
+  });
+
+  it('starts a clean baseline after clearSave', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(T0);
+    seedSave(T0, 100);
+    const tab = await openTab();
+    tab.loadGame();
+    tab.clearSave();
+    vi.setSystemTime(T0 + 5_000);
+    expect(tab.saveGame(defaultState())).toBe('ok');
   });
 });
 

@@ -14,6 +14,46 @@ export const DS = 2; // meters between samples
 export const ROAD_HALF_WIDTH = 4.6; // full road ~9.2m (two lanes + shoulders)
 export const LANE_OFFSET = 2.1; // center of right lane
 
+/**
+ * Fraction of the local radius of curvature at which the lateral map starts
+ * giving ground back, and the fraction it may never exceed.
+ *
+ * The offset map `P(s) + N(s)*lat` stretches by `1 + k*lat` per metre of s, so
+ * on the inside of a bend it collapses to a point at `lat = -1/k` and turns
+ * itself inside out beyond that. The road's curvature is a closed-form sum of
+ * four sines, so the tightest bend it can produce is exactly
+ * `1 / (0.0042 + 0.0035 + 0.0028 + 0.0009)` = 87.7 m — well inside the +/-165 m
+ * the terrain ribbon reaches, which is why the far field used to crumple.
+ *
+ * There is no widening out of it: the ground on the inside of a bend simply
+ * is not 165 m of ground, it is a disc of radius R, and any map that claims
+ * otherwise covers the same dirt twice. So the far columns compress instead,
+ * smoothly, asymptoting to FOLD_LIMIT of the radius and never reaching it. The
+ * stretch factor therefore stays above `1 - FOLD_LIMIT` everywhere and no cell
+ * can invert (docs/ARCHITECTURE.md 5.3).
+ */
+export const FOLD_START = 0.6;
+export const FOLD_LIMIT = 0.85;
+
+/**
+ * The lateral offset the world is actually built at, given the local curvature.
+ *
+ * Identity while `|k*lat|` stays under FOLD_START — which covers the road, the
+ * car, every pickup and the near field at every curvature the generator can
+ * produce — then compresses the inside-of-bend columns onto an asymptote at
+ * FOLD_LIMIT of the radius. C1 at the handover and monotone in `lateral`, so
+ * the terrain grid stays continuous and keeps its winding.
+ */
+export function foldSafeLateral(curvature: number, lateral: number): number {
+  const w = curvature * lateral;
+  // Positive w is the outside of the bend: it stretches, and never folds.
+  if (w >= -FOLD_START) return lateral;
+  const range = FOLD_LIMIT - FOLD_START;
+  const excess = -w - FOLD_START;
+  const wEff = -(FOLD_START + range * (1 - Math.exp(-excess / range)));
+  return wEff / curvature;
+}
+
 interface Sample {
   x: number;
   y: number;
@@ -32,8 +72,13 @@ export class RoadPath {
     this.samples.push({ x: 0, y: 0, z: 0, heading: 0 });
   }
 
-  /** Curvature (1/radius) at distance s. Max ~1/85m. */
-  private curvature(s: number): number {
+  /**
+   * Curvature (1/radius) at distance s. Closed form, so the radius of any
+   * point on the road is exactly `1 / |curvature(s)|` — derive it rather than
+   * sampling it, and check it before calling a stretch of road tight.
+   * Bounded by the sum of the four amplitudes: |k| <= 1/87.7 m.
+   */
+  curvature(s: number): number {
     const k =
       Math.sin(s * 0.0031 + this.seed * 0.71) * 0.0042 +
       Math.sin(s * 0.00117 + this.seed * 1.93) * 0.0035 +
@@ -93,10 +138,20 @@ export class RoadPath {
     this.ensure(s + DS);
   }
 
-  /** Drop samples earlier than s (keep a small margin). */
+  /**
+   * Drop samples earlier than s (keep a small margin).
+   *
+   * The drop is clamped against what is actually stored: a prune far past the
+   * ensured window would otherwise splice the buffer empty, and every later
+   * `pose()` would read `samples[0]` as undefined and throw from inside the
+   * rAF loop. `baseS` always follows whatever survives, so the retained
+   * samples keep their true s.
+   */
   prune(s: number): void {
     const margin = 400;
-    const dropCount = Math.floor((s - margin - this.baseS) / DS);
+    const wanted = Math.floor((s - margin - this.baseS) / DS);
+    // pose() interpolates between a pair, so never leave fewer than two.
+    const dropCount = Math.min(wanted, this.samples.length - 2);
     if (dropCount > 200) {
       this.samples.splice(0, dropCount);
       this.baseS += dropCount * DS;
@@ -142,15 +197,51 @@ export class RoadPath {
     return res;
   }
 
-  /** World position at (s, lateral). lateral > 0 = right of travel direction. */
+  /**
+   * The lateral offset (s, lateral) is really built at, after the far-field
+   * compression that keeps the offset map from folding. Identity for anything
+   * inside FOLD_START of the local radius — the road, the car, pickups, the
+   * near field — so callers there can ignore it. Anything that has to agree
+   * with `point` about where a lateral landed (terrain heights, terrain
+   * colour) must ask for this rather than using the raw offset.
+   */
+  effectiveLateral(s: number, lateral: number): number {
+    return foldSafeLateral(this.curvature(s), lateral);
+  }
+
+  /**
+   * World position at (s, lateral). lateral > 0 = right of travel direction.
+   *
+   * Costs a `curvature(s)` — four `Math.sin` — on top of the pose lookup,
+   * because the offset has to be fold-corrected. A loop walking a whole grid
+   * row at one `s` should hoist that out: take `curvature(s)` once, run the
+   * columns through `foldSafeLateral`, and call `pointAtEffective`. Measured
+   * on the terrain and road grids, that is the difference between ~180 us and
+   * ~20 us of vertex placement per chunk.
+   */
   point(s: number, lateral: number, out?: THREE.Vector3): THREE.Vector3 {
+    return this.pointAtEffective(s, foldSafeLateral(this.curvature(s), lateral), out);
+  }
+
+  /**
+   * World position at (s, effectiveLateral), skipping the fold correction
+   * because the caller has already applied it.
+   *
+   * `effectiveLateral` must be a value that came out of `foldSafeLateral` (or
+   * `effectiveLateral()`) for *this* `s` — passing a raw offset here puts the
+   * point somewhere `point()` would never have put it, which is precisely the
+   * fold this whole mechanism exists to prevent. Exists for the grid builders,
+   * which place a row of columns at one `s` and would otherwise recompute the
+   * same curvature once per column.
+   */
+  pointAtEffective(s: number, effectiveLateral: number, out?: THREE.Vector3): THREE.Vector3 {
     const p = this.pose(s, this.scratch);
     const res = out ?? new THREE.Vector3();
     // Right-hand normal of heading: forward is (sin h, cos h), so the
     // traveler's right is (-cos h, sin h).
     const nx = -Math.cos(p.heading);
     const nz = Math.sin(p.heading);
-    res.set(p.pos.x + nx * lateral, p.pos.y, p.pos.z + nz * lateral);
+    res.set(p.pos.x + nx * effectiveLateral, p.pos.y, p.pos.z + nz * effectiveLateral);
     return res;
   }
 

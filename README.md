@@ -67,3 +67,14 @@ Releases are cut by pushing a `vX.Y.Z` tag; see
 
 Three.js · postprocessing (god rays/bloom) · Vite · TypeScript · Web Audio (generative,
 zero audio files) · Electron for the desktop builds · zero backend, zero external assets.
+
+## License
+
+EverRoad is released under the [MIT License](LICENSE) — © 2026 Troll-Phace.
+You may use, copy, modify and redistribute it, including commercially, as long
+as the copyright notice and licence text travel with it.
+
+The bundled typefaces — **Quicksand** and **JetBrains Mono** — are *not* MIT.
+Both are SIL Open Font License 1.1, and their licence texts ship alongside them
+in `public/fonts/`. See the third-party notices at the end of
+[LICENSE](LICENSE).

@@ -96,11 +96,14 @@ export class Pickups {
     // Magnet only works with hands on the wheel — idle cruising still scoops
     // direct hits, but weaving is what pays.
     const magnetR = active ? this.deps.getMagnetRadius() : 0;
-    const m = new THREE.Matrix4();
-    const q = new THREE.Quaternion();
-    const e = new THREE.Euler();
-    const v = new THREE.Vector3();
-    const p = new THREE.Vector3();
+    // Scratch is module-level: this loop runs every frame and the frame budget
+    // is zero steady-state allocation (docs/ARCHITECTURE.md §14). Nothing here
+    // escapes the loop body — `m` is copied into the instance matrix.
+    const m = tmpMatrix;
+    const q = tmpQuat;
+    const e = tmpEuler;
+    const v = tmpPos;
+    const p = tmpPoint;
     let renderCount = 0;
     for (const coin of this.coins) {
       if (!coin.active) continue;
@@ -286,3 +289,8 @@ export class Pickups {
 }
 
 const ONE = new THREE.Vector3(1, 1, 1);
+const tmpMatrix = new THREE.Matrix4();
+const tmpQuat = new THREE.Quaternion();
+const tmpEuler = new THREE.Euler();
+const tmpPos = new THREE.Vector3();
+const tmpPoint = new THREE.Vector3();
