@@ -1,4 +1,4 @@
-# Everroad — Handcrafted Model Pipeline
+# EverRoad — Handcrafted Model Pipeline
 
 Blender-authored replacements for individual procedural assets, baked into the
 bundle at build time.

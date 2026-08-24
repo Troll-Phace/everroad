@@ -233,7 +233,7 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
     if (!show) return;
     const ready = status.phase === 'ready';
     setNoticeLabel(
-      ready ? `v${status.version} is ready to install` : `Everroad v${status.version} is available`,
+      ready ? `v${status.version} is ready to install` : `EverRoad v${status.version} is available`,
     );
     setNoticeSub(
       ready

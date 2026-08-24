@@ -7,7 +7,7 @@
  * question the player actually cares about before pressing Download: *will this
  * still be able to read my journey?* `SAVE_VERSION` is a compile-time constant
  * baked into each bundle (src/types.ts), so an old build has no way to see the
- * new one's value — and Everroad is pre-1.0, where a patch bump is explicitly
+ * new one's value — and EverRoad is pre-1.0, where a patch bump is explicitly
  * allowed to move the save format (CHANGELOG.md). The version number carries no
  * signal on its own.
  *

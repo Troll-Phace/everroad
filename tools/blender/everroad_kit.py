@@ -1,5 +1,5 @@
 """
-Everroad Blender authoring kit.
+EverRoad Blender authoring kit.
 
 Recipes import this module, build a model out of low-poly primitives, and call
 `export()`. The recipe file is the source of truth for the model — the .blend

@@ -1,4 +1,4 @@
-# Everroad — UI Module
+# EverRoad — UI Module
 
 DOM/CSS overlay rendered inside `#ui-root`. No Three.js; everything imports only
 from `src/types.ts` and files within `src/ui/`. Entry point:
@@ -230,7 +230,7 @@ position.
    `armConfirm`: it destroys nothing. The panel's last line is the same build
    badge the menu carries, after the danger zone. Both badges come from
    `createBuildBadge` in `src/ui/buildBadge.ts`: the terse `v0.1.17 · web · sha`
-   line is `aria-hidden` and the spoken form ("Everroad 0.1.17, web build,
+   line is `aria-hidden` and the spoken form ("EverRoad 0.1.17, web build,
    commit sha") rides along as `.sr-only` text inside the element. It is not an
    `aria-label` — a plain container maps to the ARIA `generic` role, which
    prohibits naming, so the label would be discarded and the dotted string read

@@ -1,4 +1,4 @@
-# Everroad — Achievements
+# EverRoad — Achievements
 
 Complete reference for all **127 achievements**, grouped by category.
 Generated from `src/game/achievements/definitions.ts` — that file is the source of truth.

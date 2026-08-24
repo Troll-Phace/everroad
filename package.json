@@ -7,7 +7,7 @@
   "main": "electron/main.cjs",
   "author": "Troll-Phace (https://github.com/Troll-Phace)",
   "homepage": "https://github.com/Troll-Phace/everroad",
-  "description": "Everroad — an idle infinite driving game. Drive through a painted countryside forever.",
+  "description": "EverRoad — an idle infinite driving game. Drive through a painted countryside forever.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",

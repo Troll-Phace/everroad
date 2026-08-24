@@ -1,5 +1,5 @@
 /**
- * Everroad — car catalog.
+ * EverRoad — car catalog.
  *
  * Twelve cars across seven tiers, from the free rusty-hatch to the
  * token-bought Auroracraft. Costs roughly x6–10 per coin tier; relic and

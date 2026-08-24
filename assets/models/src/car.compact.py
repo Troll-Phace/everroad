@@ -2,7 +2,7 @@
 car.compact — the rusty-hatch starter car.
 
 Reference: 1988-95 Honda Civic sedan, the ordinary beige one, pushed toward
-Everroad's toy proportions: wheels shoved into the corners and a touch too
+EverRoad's toy proportions: wheels shoved into the corners and a touch too
 big, chunky dark bumpers, a tall glassy greenhouse, short overhangs.
 
 The one deliberate note of shabbiness is the rear bumper, which hangs a few

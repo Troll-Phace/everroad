@@ -137,7 +137,7 @@ export function settingsPanel(
           const exitNote = el(
             'div',
             'settings-note',
-            inGame ? 'Saves your journey, then closes Everroad.' : 'Closes Everroad.',
+            inGame ? 'Saves your journey, then closes EverRoad.' : 'Closes EverRoad.',
           );
           // A plain button, not armConfirm: DESIGN_SYSTEM §4.2 reserves the
           // arm-and-confirm for actions that destroy something, and this one
@@ -177,7 +177,7 @@ export function settingsPanel(
           el(
             'div',
             'settings-note',
-            'Everroad asks GitHub once per launch whether a newer release exists. ' +
+            'EverRoad asks GitHub once per launch whether a newer release exists. ' +
               'It is the only network request the game makes.',
           ),
         );
@@ -193,7 +193,7 @@ export function settingsPanel(
           if (status.phase === 'error') return status.error ?? 'The last check failed.';
           if (updateOffered(status)) return `v${status.version} is available — see the main menu.`;
           if (status.checkedAt === null) return 'Not checked yet this session.';
-          return 'Everroad is up to date.';
+          return 'EverRoad is up to date.';
         }
 
         checkNote.textContent = describe();

@@ -28,7 +28,7 @@ export function helpPanel(): PanelDef {
         el(
           'p',
           'help-blurb',
-          'Everroad drives itself — coins accrue every mile, even while you are away. ' +
+          'EverRoad drives itself — coins accrue every mile, even while you are away. ' +
             'Take the wheel to weave through coin lines, drift, and shave past hay bales ' +
             'for a combo multiplier that pays out fast. When your journey has gone far ' +
             'enough, begin a New Journey to earn Horizon Tokens and grow permanently stronger.',

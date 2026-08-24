@@ -1,4 +1,4 @@
-# Everroad — Game Design Document
+# EverRoad — Game Design Document
 
 *An idle infinite driving game. Drive through a painted countryside forever.*
 

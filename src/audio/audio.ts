@@ -1,5 +1,5 @@
 /**
- * Everroad audio engine — fully generative Web Audio, no assets, no DOM.
+ * EverRoad audio engine — fully generative Web Audio, no assets, no DOM.
  *
  * Node graph (see docs/AUDIO.md for details):
  *

@@ -7,7 +7,7 @@
  * - the terse `v0.1.17 · web · be074dc` line, which is what a sighted player
  *   sees and what they copy into a bug report, marked `aria-hidden` because
  *   middle dots and a bare sha read as noise out loud; and
- * - the spoken form, `Everroad 0.1.17, web build, commit be074dc`, carried as
+ * - the spoken form, `EverRoad 0.1.17, web build, commit be074dc`, carried as
  *   visually-hidden text *inside* the badge rather than as an `aria-label`.
  *
  * The `aria-label` route is the trap here: the badge is a plain container,
@@ -24,7 +24,7 @@ import { el } from './dom';
 
 /** The spoken form of the build identity — also used as the `title` tooltip. */
 export function buildDescription(): string {
-  return `Everroad ${APP_VERSION}, ${runtime()} build, commit ${BUILD_COMMIT}`;
+  return `EverRoad ${APP_VERSION}, ${runtime()} build, commit ${BUILD_COMMIT}`;
 }
 
 /**

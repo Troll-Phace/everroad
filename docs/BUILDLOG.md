@@ -1,11 +1,11 @@
-# Everroad — Build Log
+# EverRoad — Build Log
 
 ## 2026-08-24 — Session 1
 
 - **Spec locked** via Q&A: hybrid idle/active loop, chase cam, full offline progress,
   blended biomes (hero = autumn/Emberwood with god-ray sunsets), multi-currency +
   prestige, garage + parts, 100+ achievements, winding road, cozy-medium pacing,
-  generative audio, glassy UI, local saves. Name: **Everroad**.
+  generative audio, glassy UI, local saves. Name: **EverRoad**.
 - **Stack chosen:** Three.js + pmndrs `postprocessing` + Vite + TS. Zero assets/backend.
 - Scaffolded project; wrote `src/types.ts` as the frozen inter-module contract.
 - Docs: GDD, ARCHITECTURE, README.

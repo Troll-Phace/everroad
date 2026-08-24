@@ -1,5 +1,5 @@
 /**
- * Everroad — upgrade catalogs.
+ * EverRoad — upgrade catalogs.
  *
  * Per-car parts (reset on prestige, bought with coins) and the permanent
  * Horizon shop (bought with tokens). Numeric per-level effects live here as

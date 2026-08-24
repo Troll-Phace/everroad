@@ -1,5 +1,5 @@
 /**
- * Build identity: which version of Everroad this is, where it came from, and
+ * Build identity: which version of EverRoad this is, where it came from, and
  * which of the two runtimes it is running in.
  *
  * The three constants are compile-time substitutions (`vite.config.ts` ->

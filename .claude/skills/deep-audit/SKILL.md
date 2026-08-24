@@ -15,7 +15,7 @@ reproduction before reporting it — a save code, a seeded road segment, a
 simulated tick sequence, or a failing test. Unverified suspicions go in the
 report's "unconfirmed" list, not into issues.
 
-For Everroad the recurring classes worth naming: module-boundary drift (DOM or
+For EverRoad the recurring classes worth naming: module-boundary drift (DOM or
 Three.js reaching into the pure modules), per-frame allocation and undisposed
 geometry, save migration paths that no longer round-trip, economy constants
 that have drifted from docs/ECONOMY.md, achievement conditions that can never

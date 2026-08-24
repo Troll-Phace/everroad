@@ -79,7 +79,7 @@ export interface UpdateStatus {
  * update feed, so there is no URL, path or version for this side to supply —
  * and therefore none for a compromised page to choose. See ARCHITECTURE §16.8.
  */
-export interface EverroadUpdates {
+export interface EverRoadUpdates {
   /** The current status, for the first paint. */
   status(): Promise<UpdateStatus>;
   /** Subscribe to changes; returns its own unsubscribe. */
@@ -97,7 +97,7 @@ export interface EverroadUpdates {
 }
 
 /** The complete main-process surface available to the renderer. */
-export interface EverroadDesktop {
+export interface EverRoadDesktop {
   /** The packaged app's version, from `app.getVersion()`. */
   readonly version: string;
   /** Host platform, for the build badge and platform-specific copy. */
@@ -108,13 +108,13 @@ export interface EverroadDesktop {
    * The updater, absent in the web build and on any desktop build whose preload
    * predates it. Every caller handles the `undefined`.
    */
-  readonly updates?: EverroadUpdates;
+  readonly updates?: EverRoadUpdates;
 }
 
 declare global {
   interface Window {
     /** Present only in the Electron build. See `electron/preload.cjs`. */
-    everroad?: EverroadDesktop;
+    everroad?: EverRoadDesktop;
   }
 }
 
@@ -125,7 +125,7 @@ declare global {
  * name any extension or userscript could squat on, and a partially-formed
  * object would fail later at a call site instead of here.
  */
-export function desktop(): EverroadDesktop | null {
+export function desktop(): EverRoadDesktop | null {
   if (typeof window === 'undefined') return null;
   const bridge = window.everroad;
   if (!bridge || typeof bridge !== 'object') return null;
@@ -144,7 +144,7 @@ export function desktop(): EverroadDesktop | null {
  * nothing else; folding it into the main shape check would make it cost them
  * Quit to Desktop as well, which has no relation to it.
  */
-export function desktopUpdates(): EverroadUpdates | null {
+export function desktopUpdates(): EverRoadUpdates | null {
   const bridge = desktop();
   const updates = bridge?.updates;
   if (!updates || typeof updates !== 'object') return null;

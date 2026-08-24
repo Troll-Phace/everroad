@@ -1,5 +1,5 @@
 /**
- * Everroad — achievement tracker.
+ * EverRoad — achievement tracker.
  *
  * Evaluates achievement conditions against the current game/runtime state,
  * unlocks new achievements, grants their rewards, and reports progress.

@@ -1,5 +1,5 @@
 /**
- * Everroad — achievement definitions.
+ * EverRoad — achievement definitions.
  *
  * A RuneScape-style completionist wall: tiered ladders per category plus a
  * handful of quirky secrets. Conditions are pure and cheap — simple numeric

@@ -1,4 +1,4 @@
-# electron-builder configuration for the Everroad desktop app.
+# electron-builder configuration for the EverRoad desktop app.
 #
 # Kept out of package.json deliberately: this file needs more comment than
 # explanation-free JSON can carry, and package.json stays readable.
@@ -7,7 +7,7 @@
 # the two files in electron/. Nothing here is a second copy of the game.
 
 appId: com.trollphace.everroad
-productName: Everroad
+productName: EverRoad
 copyright: Copyright © 2026 Troll-Phace
 
 directories:
