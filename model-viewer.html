@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Everroad — model viewer</title>
+    <style>
+      :root {
+        color-scheme: light;
+        font-family: 'Quicksand', system-ui, sans-serif;
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        height: 100vh;
+        overflow: hidden;
+        background: #d2ecd2;
+      }
+      #viewer-canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+      }
+      .panel {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+        padding: 14px 16px;
+        border-radius: 14px;
+        background: rgba(255, 255, 255, 0.82);
+        box-shadow: 0 6px 24px rgba(40, 70, 40, 0.18);
+        backdrop-filter: blur(6px);
+        font-size: 13px;
+        line-height: 1.5;
+        color: #2c3c2c;
+        max-width: 300px;
+      }
+      select {
+        font: inherit;
+        padding: 6px 8px;
+        border-radius: 8px;
+        border: 1px solid #b6cdb6;
+        background: #fff;
+      }
+      label {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        cursor: pointer;
+      }
+      .row {
+        display: flex;
+        gap: 14px;
+      }
+      .muted {
+        color: #6f8a6f;
+      }
+      .delta {
+        color: #a2662a;
+      }
+      .legend {
+        display: flex;
+        justify-content: space-between;
+        font-size: 12px;
+        color: #4c644c;
+        border-top: 1px solid #c7dcc7;
+        padding-top: 8px;
+      }
+      .hint {
+        font-size: 11.5px;
+        color: #6f8a6f;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="viewer-canvas"></canvas>
+    <div class="panel">
+      <select id="subject" aria-label="Subject"></select>
+      <div class="row">
+        <label><input type="checkbox" id="spin" checked /> spin</label>
+        <label><input type="checkbox" id="wire" /> wireframe</label>
+      </div>
+      <div id="stats"></div>
+      <div class="legend"><span>◀ procedural</span><span>handcrafted ▶</span></div>
+      <div class="hint">
+        ● marks a subject with a handcrafted model. Dev only — this page is not built into the
+        bundle.
+      </div>
+    </div>
+    <script type="module" src="/src/tools/modelViewer.ts"></script>
+  </body>
+</html>

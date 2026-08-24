@@ -21,7 +21,13 @@
       "Bash(git branch *)",
       "Bash(git switch *)",
       "Bash(git checkout -b *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Bash(npm run models)",
+      "Bash(npm run models:*)",
+      "mcp__blender__get_scene_info",
+      "mcp__blender__get_object_info",
+      "mcp__blender__get_viewport_screenshot",
+      "mcp__blender__execute_blender_code"
     ],
     "deny": [
       "Bash(sudo *)",

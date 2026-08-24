@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import * as BufferGeometryUtils from 'three/addons/utils/BufferGeometryUtils.js';
 import { rng } from './materials';
+import { handcraftedProto } from './models/sceneryModel';
 import type { SceneryKind } from './biomes';
 
 /**
@@ -135,13 +136,16 @@ const protoCache = new Map<SceneryKind, Proto>();
 export function getProto(kind: SceneryKind): Proto {
   let p = protoCache.get(kind);
   if (!p) {
-    p = buildInner(kind);
+    // Procedural is the default. A handcrafted proto only exists for kinds
+    // someone deliberately authored a Blender recipe for (docs/MODELS.md).
+    p = handcraftedProto(kind) ?? buildProceduralProto(kind);
     protoCache.set(kind, p);
   }
   return p;
 }
 
-function buildInner(kind: SceneryKind): Proto {
+/** The procedural builder. Exported so the model viewer can compare against it. */
+export function buildProceduralProto(kind: SceneryKind): Proto {
   switch (kind) {
     case 'oak':
       return buildProto(

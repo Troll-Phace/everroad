@@ -67,17 +67,21 @@ export const BIOME_NAMES: Record<BiomeId, string> = {
 // Cars
 // ---------------------------------------------------------------------------
 
-export type CarBodyType =
-  | 'compact'
-  | 'sedan'
-  | 'wagon'
-  | 'pickup'
-  | 'van'
-  | 'classic'
-  | 'sports'
-  | 'muscle'
-  | 'super'
-  | 'hover';
+/** Every car body type, as a runtime list; the type derives from it. */
+export const CAR_BODY_TYPES = [
+  'compact',
+  'sedan',
+  'wagon',
+  'pickup',
+  'van',
+  'classic',
+  'sports',
+  'muscle',
+  'super',
+  'hover',
+] as const;
+
+export type CarBodyType = (typeof CAR_BODY_TYPES)[number];
 
 export interface CarStyle {
   bodyType: CarBodyType;

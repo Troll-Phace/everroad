@@ -11,10 +11,14 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "verify": "tsc --noEmit && vitest run && vite build && node scripts/check-bundle-size.mjs",
+    "verify": "tsc --noEmit && vitest run && node scripts/build-models.mjs --check && vite build && node scripts/check-bundle-size.mjs",
     "format": "prettier --write",
     "format:check": "prettier --check \"src/**/*.{ts,css}\" \"scripts/**/*.mjs\"",
-    "size": "node scripts/check-bundle-size.mjs"
+    "size": "node scripts/check-bundle-size.mjs",
+    "models": "node scripts/build-models.mjs",
+    "models:check": "node scripts/build-models.mjs --check",
+    "models:blender": "\"${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}\" --background --python tools/blender/build_models.py --",
+    "models:smoke": "\"${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}\" --background --python tools/blender/smoke_test.py"
   },
   "dependencies": {
     "postprocessing": "^6.36.4",

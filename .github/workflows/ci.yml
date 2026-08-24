@@ -61,6 +61,22 @@ jobs:
       - name: vitest run
         run: npm run test:run -- --reporter=verbose
 
+  models:
+    name: Model codegen
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      # Blender is not installed here on purpose: the .evr.json intermediates
+      # are committed, so CI only has to prove the generated module matches
+      # them. Regenerating from the recipes is a local step.
+      - name: Generated models are up to date
+        run: npm run models:check
+
   build:
     name: Build & bundle budget
     runs-on: ubuntu-latest
@@ -98,13 +114,14 @@ jobs:
     name: CI
     runs-on: ubuntu-latest
     if: always()
-    needs: [format, typecheck, test, build, audit]
+    needs: [format, typecheck, test, models, build, audit]
     steps:
       - name: Gate on required jobs
         run: |
           echo "format=${{ needs.format.result }}"
           echo "typecheck=${{ needs.typecheck.result }}"
           echo "test=${{ needs.test.result }}"
+          echo "models=${{ needs.models.result }}"
           echo "build=${{ needs.build.result }}"
           echo "audit=${{ needs.audit.result }}"
           if [ "${{ contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled') }}" = "true" ]; then

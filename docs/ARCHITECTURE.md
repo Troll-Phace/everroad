@@ -155,10 +155,21 @@ src/
     sky.ts             Gradient sky dome, sun disc, stars, aurora
     weather.ts         Weather state machine + particles
     car.ts             Procedural car mesh builder (from CarStyle)
+    carPalette.ts      Fixed car tones shared by both car builders
     vehicle.ts         Car controller: autopilot, steering, drift
     camera.ts          Chase camera rig
     pickups.ts         Coins/relics, magnet, near-miss detection
     postfx.ts          EffectComposer: god rays, bloom, vignette, SMAA
+
+    models/            Handcrafted (Blender) replacements — opt-in per asset
+      generated.ts     GENERATED quantised model data (npm run models)
+      codec.ts         Decoder: base64 -> positions/normals/shade
+      registry.ts      Lookup + the ?models=procedural override
+      sceneryModel.ts  Encoded model -> Proto
+      carModel.ts      Encoded model -> CarRig
+
+  tools/
+    modelViewer.ts     Dev-only A/B lookdev bench (/model-viewer.html)
 
   game/
     economy/           pure logic, no DOM/Three
@@ -190,6 +201,21 @@ src/
     dom.ts             Change-detecting DOM helpers
     icons.ts           Emoji maps
     ui.css             Overlay styles
+
+tools/blender/         Blender-side model pipeline (see docs/MODELS.md)
+  everroad_kit.py      Authoring kit recipes import
+  everroad_export.py   Scene -> .evr.json
+  build_models.py      Headless rebuild of every recipe
+  smoke_test.py        Exporter regression test
+
+assets/models/
+  src/*.py             Model recipes — the source of truth
+  *.evr.json           Exported intermediates, committed so CI needs no Blender
+
+scripts/
+  build-models.mjs     .evr.json -> src/world/models/generated.ts
+  lib/model-codec.mjs  Validator, budgets, encoder
+  check-bundle-size.mjs
 ```
 
 ### 3.3 Dependency shape
@@ -456,6 +482,27 @@ blend, the gradient sky, and the effect stack.
 vignette, and SMAA. The quality setting (`low | medium | high`) scales this
 stack; `low` is the escape hatch for weak GPUs and must remain genuinely
 cheaper, not merely dimmer.
+
+### 5.9 Handcrafted models (`world/models/`, `tools/blender/`)
+
+Individual assets may be replaced by a Blender-authored model. **Procedural
+remains the default**: `getProto` and `buildCar` look for a handcrafted model
+and fall through to `buildProceduralProto` / `buildProceduralCar` when there
+isn't one, which is the ordinary case. The opt-in is the existence of a recipe
+in `assets/models/src/`.
+
+Nothing is fetched. A Blender recipe is exported to a readable `.evr.json`
+intermediate, and `npm run models` quantises that into `models/generated.ts` —
+Int16 positions against a per-part bounding box, Uint16 indices, Uint8 shade,
+with normals derived at boot from triangle winding. A full car costs roughly
+5 kB of bundle. Scenery decodes into exactly the `Proto` shape `buildProto`
+produces, so `chunks.ts` bakes a handcrafted tree through the same merged-
+geometry path with no extra draw call; cars decode into exactly the `CarRig`
+shape `animateCar` and `disposeCar` expect.
+
+`?models=procedural` disables handcrafted models at runtime for comparison, and
+`/model-viewer.html` (dev only) renders both side by side under the game's
+materials. The full reference is docs/MODELS.md.
 
 ---
 
@@ -900,6 +947,7 @@ them live.
 | Draw calls | Instanced per scenery kind per chunk, not per object | A per-object draw call in `scenery.ts` is a regression |
 | Cold start to playable | Under ~3 s on a warm cache | Nothing is fetched; the loading screen covers scene construction |
 | Bundle | Well under the 1500 kB Vite warning ceiling | Three.js dominates; a new dependency needs a reason |
+| Handcrafted models | ≤ 120 kB of decoded geometry across all of them | Enforced by `npm run models`; a scenery proto should sit near its procedural counterpart's triangle count, not the ceiling |
 | Audio nodes | Bounded — one-shots are constructed, played, and released | A leak here shows up as gradual CPU climb over a long session |
 | localStorage write | Every 5 s, single JSON serialize | Growth in `GameState` is growth in this write |
 | Offline computation | O(1) regardless of gap | Capped at 14 days; never a replay loop |
@@ -920,6 +968,10 @@ them live.
 | `npm run build` | typecheck + `vite build` |
 | `npm run preview` | Serve the built bundle |
 | `npm run format:check` | Prettier check over `src/**/*.{ts,css}` |
+| `npm run models` | Rebuild `src/world/models/generated.ts` from `assets/models/` |
+| `npm run models:check` | Fail if the generated module is stale — the CI gate |
+| `npm run models:blender` | Re-run the Blender recipes (needs Blender locally) |
+| `npm run models:smoke` | Exporter regression test (needs Blender locally) |
 
 ### Fixed decisions
 
@@ -931,7 +983,8 @@ them live.
 | Save key | `everroad-save-v1`; export prefix `EVR1.` |
 | Three.js | r185, with `@types/three` pinned to match |
 | Backend | none, ever |
-| External assets | none, ever — everything is procedural |
+| External assets | none, ever — nothing is fetched at runtime |
+| Asset authoring | procedural by default; individual assets may be replaced by a Blender model compiled into the bundle at build time (docs/MODELS.md) |
 | Repository | `Troll-Phace/everroad`, default branch `main` |
 | CI | `.github/workflows/ci.yml`; `.githooks/pre-push` mirrors it locally |
 
@@ -959,6 +1012,7 @@ them live.
 - docs/AUDIO.md — the full node graph and synthesis detail
 - docs/UI.md — panel-by-panel overlay specification
 - docs/DESIGN_SYSTEM.md — tokens, component specs, motion, accessibility
+- docs/MODELS.md — the Blender -> bundle model pipeline
 - docs/BUILDLOG.md — running build diary
 
 *This document evolves with the implementation.*
