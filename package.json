@@ -16,7 +16,7 @@
     "test:run": "vitest run",
     "verify": "tsc --noEmit && vitest run && node scripts/build-models.mjs --check && node scripts/build-changelog.mjs --check && vite build && node scripts/check-bundle-size.mjs",
     "format": "prettier --write",
-    "format:check": "prettier --check \"src/**/*.{ts,css}\" \"scripts/**/*.mjs\" \"electron/**/*.cjs\"",
+    "format:check": "prettier --check \"src/**/*.{ts,css}\" \"scripts/**/*.mjs\" \"electron/**/*.{cjs,ts}\"",
     "size": "node scripts/check-bundle-size.mjs",
     "models": "node scripts/build-models.mjs",
     "models:check": "node scripts/build-models.mjs --check",

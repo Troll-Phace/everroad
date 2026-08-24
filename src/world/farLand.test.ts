@@ -49,15 +49,25 @@ describe('far land profile', () => {
     // This is what keeps the fan from overlapping itself as seen from the
     // camera at its centre, and — with the surface being continuous — what
     // makes its angular coverage gapless.
-    for (let j = 0; j < AZIMUTHS; j++) {
+    // 720 azimuths x 401 samples. The comparison is plain JS and only the
+    // first breach is handed to `expect`: asserting inside the loop meant
+    // ~289,000 matcher calls, which cost seconds of the suite's budget and
+    // eventually tipped this test over the 5s default once another test file
+    // was added to run alongside it. The coverage is identical.
+    let breach: { azimuth: number; sample: number } | null = null;
+    outer: for (let j = 0; j < AZIMUTHS; j++) {
       const az = azimuth(j);
       let prev = -Infinity;
       for (let i = 0; i <= 400; i++) {
         const angle = farLandAngle(i / 400, az);
-        expect(angle).toBeGreaterThan(prev);
+        if (!(angle > prev)) {
+          breach = { azimuth: j, sample: i };
+          break outer;
+        }
         prev = angle;
       }
     }
+    expect(breach).toBeNull();
   });
 
   it('starts well below the land silhouette so nothing shows under the rim', () => {

@@ -7,6 +7,11 @@ export default defineConfig({
   define: buildDefines(),
   test: {
     environment: 'node',
-    include: ['src/**/*.test.ts', 'scripts/**/*.test.mjs', 'scripts/**/*.test.ts'],
+    include: [
+      'src/**/*.test.ts',
+      'scripts/**/*.test.mjs',
+      'scripts/**/*.test.ts',
+      'electron/**/*.test.ts',
+    ],
   },
 });
