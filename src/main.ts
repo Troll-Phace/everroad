@@ -35,7 +35,12 @@ economy.initEconomy(state);
 const runtime = defaultRuntime();
 
 // Offline progress (computed before the world spins up).
-const awaySec = save.offlineSeconds(state);
+// Dev-only: ?fakeaway=7200 simulates returning after N seconds away.
+const fakeAway = import.meta.env.DEV
+  ? Number(new URLSearchParams(location.search).get('fakeaway') ?? 0)
+  : 0;
+const awaySec = fakeAway > 0 ? fakeAway : save.offlineSeconds(state);
+console.info(`[everroad] away ${Math.round(awaySec)}s`);
 let offlinePending: { seconds: number; coins: number } | null = null;
 if (awaySec > 60) {
   const coins = economy.getIdleCoinsPerSec(state) * awaySec;
@@ -450,6 +455,8 @@ if (import.meta.env.DEV) {
     bus,
     daynight,
     weather,
+    chunks,
+    pickups,
   };
 }
 

@@ -107,7 +107,7 @@ export class Pickups {
       // Collect
       if (Math.abs(coin.s - carS) < 1.9 && Math.abs(coin.lateral - carLat) < 1.4) {
         coin.active = false;
-        this.gainCombo(0.12);
+        if (active) this.gainCombo(0.12);
         const value = this.deps.getPickupCoinValue(this.combo);
         this.deps.onCoins(value);
         this.bus.emit('pickup', { kind: 'coin', value });
