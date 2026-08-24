@@ -15,11 +15,30 @@ import { vertexToonMat, rng, noise2, jitterColor } from './materials';
 export const CHUNK_LEN = 60;
 const AHEAD = 22; // chunks ahead of the car (~1.3 km)
 /**
- * Chunks retained behind the car. Exported because a path re-seed has to
- * keep at least this much road behind the car for them to be built from real
- * samples rather than a clamped lookup.
+ * Chunks retained behind the car while driving. The chase camera sits ~8 m
+ * back and looks forward, so nothing ever sees the rear boundary in play and
+ * three chunks is pure slack.
  */
-export const BEHIND = 3;
+export const PLAY_BEHIND = 3;
+/**
+ * Chunks retained behind the car in attract mode.
+ *
+ * The menu director is the only rig that ever looks *back* down the road, and
+ * several of its shots stand ahead of the car to do it — `roadsideStatic`
+ * anchors as much as `MENU_MAX_LEAD` metres in front of it. At `PLAY_BEHIND`
+ * the ribbon ends 180 m behind the car, which from those vantages is 200-440 m
+ * from the eye. `FogExp2` at the thinnest density the biomes ask for
+ * (0.0038 * 0.9) leaves 25-90% of that distance's contrast intact, so the cut
+ * reads as a stepped cliff with haze under the props standing on its lip —
+ * the "terrain unloading behind the car" report.
+ *
+ * Ten chunks puts the boundary 600 m behind the car, which is
+ * `MENU_SAFE_DISTANCE` even for a shot riding level with the car, and the same
+ * fog leaves under 2% of it. The cost — seven chunks of terrain, road and
+ * scenery over the driving budget — is paid only while the menu is up.
+ * `menuCamera.test.ts` holds the two numbers together.
+ */
+export const MENU_BEHIND = 10;
 
 /** Roadside object the pickups system can near-miss against. */
 export interface Obstacle {
@@ -353,6 +372,7 @@ const COL_CREAM = new THREE.Color('#f2e5c0');
 
 export class ChunkManager {
   private chunks = new Map<number, Chunk>();
+  private behindChunks = PLAY_BEHIND;
   private mat = vertexToonMat();
   readonly root = new THREE.Group();
 
@@ -363,19 +383,38 @@ export class ChunkManager {
     scene.add(this.root);
   }
 
+  /**
+   * Chunks kept behind the car right now — `PLAY_BEHIND` or `MENU_BEHIND`.
+   * Read by callers that have to keep road samples alive for them
+   * (`main.ts`'s reseed margin).
+   */
+  get behind(): number {
+    return this.behindChunks;
+  }
+
+  /**
+   * Set how far the ribbon reaches behind the car. Takes effect on the next
+   * `update()`: growing it builds the new chunks there, shrinking it recycles
+   * them, so callers that re-seed the world anyway pay nothing extra.
+   */
+  setBehind(count: number): void {
+    this.behindChunks = Math.max(PLAY_BEHIND, Math.round(count));
+  }
+
   update(carS: number): void {
     const cur = Math.floor(carS / CHUNK_LEN);
-    for (let i = cur - BEHIND; i <= cur + AHEAD; i++) {
+    const behind = this.behindChunks;
+    for (let i = cur - behind; i <= cur + AHEAD; i++) {
       if (i >= 0 && !this.chunks.has(i)) this.buildChunk(i);
     }
     for (const [idx, chunk] of this.chunks) {
-      if (idx < cur - BEHIND || idx > cur + AHEAD) {
+      if (idx < cur - behind || idx > cur + AHEAD) {
         this.root.remove(chunk.group);
         for (const g of chunk.geos) g.dispose();
         this.chunks.delete(idx);
       }
     }
-    this.path.prune(carS - BEHIND * CHUNK_LEN - 100);
+    this.path.prune(carS - behind * CHUNK_LEN - 100);
   }
 
   /**

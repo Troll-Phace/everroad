@@ -164,6 +164,26 @@ function sightBlocked(
 }
 
 /**
+ * Furthest ahead of the car any shot may stand, metres — `roadsideStatic`'s
+ * clamp, and the only place a menu eye gets far enough forward for the road
+ * behind the car to matter at range.
+ */
+export const MENU_MAX_LEAD = 260;
+
+/**
+ * How far from the eye the ribbon's rear boundary has to be before the menu
+ * may show it, metres.
+ *
+ * `FogExp2` extinguishes contrast as `exp(-(d * density)^2)`, and the thinnest
+ * density the biomes ask for is `0.0038 * 0.9`. At 600 m that leaves under 2%
+ * of the boundary's own contrast against the far-land backdrop behind it,
+ * which is below what the cut's stepped silhouette needs to read as an edge.
+ * `chunks.MENU_BEHIND` is sized to clear this from every shot; the test suite
+ * checks the pair rather than trusting the comment.
+ */
+export const MENU_SAFE_DISTANCE = 600;
+
+/**
  * The shot list. Durations sit inside 7–11 s so the menu keeps cutting without
  * feeling like a slideshow, and the focal lengths deliberately range from a
  * wide 62° chase to a 26° telephoto roadside so successive takes do not read
@@ -250,7 +270,7 @@ export const MENU_SHOTS: MenuShot[] = [
       // reach the vantage, so the shot always cuts while the car is still
       // reading as a car rather than a speck. Scales with speed for the same
       // reason: a 120 mph super covers ground four times faster than a hatch.
-      const lead = THREE.MathUtils.clamp(target.speedMps * 5.4, 95, 260);
+      const lead = THREE.MathUtils.clamp(target.speedMps * 5.4, 95, MENU_MAX_LEAD);
       const carY = rig.car.y;
       // A vantage on the far side of a rise gets the clearance lift but still
       // watches the car through a hill, so try a few and take the first with a

@@ -479,11 +479,22 @@ for any new code:
 ### 5.3 Chunks (`chunks.ts`)
 
 `CHUNK_LEN = 60` m, with `AHEAD = 22` chunks generated ahead of the car (~1.3
-km) and `BEHIND = 3` retained, so roughly 25–28 chunks are alive at once. Each
-chunk owns a road strip, a terrain ribbon, and one merged scenery mesh. Chunks
-are allocated on entry and disposed on exit — `update` builds any chunk in
-`[cur - BEHIND, cur + AHEAD]` that is not in the map, then removes and
-`dispose()`s the geometries of every chunk outside it. There is no chunk pool;
+km) and a tail behind it that depends on who is holding the camera:
+`PLAY_BEHIND = 3` while driving, `MENU_BEHIND = 10` in attract mode. So roughly
+25–28 chunks are alive in play and 32–35 under the menu. Each chunk owns a road
+strip, a terrain ribbon, and one merged scenery mesh. Chunks are allocated on
+entry and disposed on exit — `update` builds any chunk in
+`[cur - behind, cur + AHEAD]` that is not in the map, then removes and
+`dispose()`s the geometries of every chunk outside it.
+
+The two tails exist because the chase camera never looks back and the menu
+director does (§6.4). At the driving tail the ribbon ends 180 m behind the car,
+which a shot standing ahead of the car frames from ~200 m — near enough that
+`FogExp2` leaves the cut reading as a stepped cliff with haze under the props
+on its lip. `main.ts` calls `chunks.setBehind` on each mode change, and
+`reseedMargin()` reads `chunks.behind` so a re-seed keeps road samples alive
+for whichever tail is current. `MENU_BEHIND` and `menuCamera`'s
+`MENU_SAFE_DISTANCE` are checked against each other in `menuCamera.test.ts`. There is no chunk pool;
 the geometry buffers are rebuilt per chunk. A perf regression here looks like a
 build spike at a chunk boundary, or geometries surviving the cull (see #5, #1).
 
@@ -1342,7 +1353,7 @@ them live.
 | Frame rate | 60 fps at `quality: high` on a 2020-class integrated GPU | The whole design assumes a steady frame; a dip is a bug, not a setting |
 | Frame budget | ~16.6 ms, with the effect stack inside it | God rays plus bloom are the largest single cost |
 | Per-frame allocation | Zero steady-state | Scratch vectors and colors are hoisted; pooling and instancing everywhere |
-| Live chunks | 25–28 (~1.5 km visible) | `AHEAD = 22`, `BEHIND = 3`, `CHUNK_LEN = 60` |
+| Live chunks | 25–28 driving, 32–35 in menu | `AHEAD = 22`, `PLAY_BEHIND = 3`, `MENU_BEHIND = 10`, `CHUNK_LEN = 60` |
 | Live coin instances | ≤ 160 | `COIN_CAP` |
 | Draw calls | Instanced per scenery kind per chunk, not per object | A per-object draw call in `scenery.ts` is a regression |
 | Cold start to playable | Under ~3 s on a warm cache | Nothing is fetched; the loading screen covers scene construction |
@@ -1403,7 +1414,7 @@ them live.
 |----------|-------|------|
 | `BASE_COINS_PER_MILE` | 60 | `game/economy/economy.ts` |
 | `BIOME_LEN` / `BLEND_LEN` | 2700 m / 520 m | `world/biomes.ts` |
-| `CHUNK_LEN` / `AHEAD` / `BEHIND` | 60 m / 22 / 3 | `world/chunks.ts` |
+| `CHUNK_LEN` / `AHEAD` / `PLAY_BEHIND` / `MENU_BEHIND` | 60 m / 22 / 3 / 10 | `world/chunks.ts` |
 | `DS` / `ROAD_HALF_WIDTH` / `LANE_OFFSET` | 2 m / 4.6 m / 2.1 m | `world/roadPath.ts` |
 | `CYCLE_SEC` | 545 s | `engine/daynight.ts` |
 | `HOLD_TIMEOUT` | 4 s | `engine/input.ts` |

@@ -15,7 +15,7 @@ import { BIOME_NAMES, BIOME_ORDER } from './types';
 import { Input } from './engine/input';
 import { DayNight } from './engine/daynight';
 import { RoadPath } from './world/roadPath';
-import { BEHIND, CHUNK_LEN, ChunkManager } from './world/chunks';
+import { CHUNK_LEN, ChunkManager, MENU_BEHIND, PLAY_BEHIND } from './world/chunks';
 import { Sky } from './world/sky';
 import { FarLand } from './world/farLand';
 import { START_S, Vehicle } from './world/vehicle';
@@ -384,11 +384,18 @@ function randomMenuTimeOfDay(): number {
 
 /**
  * Road kept behind the car when the path is re-seeded. ChunkManager retains
- * BEHIND chunks behind the car and builds each one from `path.pose`, which
- * clamps to the stored sample window — re-seeding exactly at the car would
- * collapse those chunks onto the first sample. Two chunks of slack.
+ * `chunks.behind` chunks behind the car and builds each one from `path.pose`,
+ * which clamps to the stored sample window — re-seeding exactly at the car
+ * would collapse those chunks onto the first sample. Two chunks of slack.
+ *
+ * Read from the manager rather than from a constant: attract mode keeps a far
+ * longer tail behind the car than driving does (`MENU_BEHIND`), and a margin
+ * sized for the shorter one would re-seed those extra chunks off a clamped
+ * lookup — a flat ramp of land where the road behind should be.
  */
-const RESEED_MARGIN = (BEHIND + 2) * CHUNK_LEN;
+function reseedMargin(): number {
+  return (chunks.behind + 2) * CHUNK_LEN;
+}
 
 /**
  * This module's own `biomeAt` out-param (docs/ARCHITECTURE.md §14). `biomeAt`
@@ -407,7 +414,7 @@ const worldBiome = createBiomeSample();
  * frame that follows.
  */
 function seedWorldAt(s: number): void {
-  path.reset(s - RESEED_MARGIN);
+  path.reset(s - reseedMargin());
   chunks.reset();
   vehicle.resetTo(s);
   pickups.reset(s);
@@ -446,6 +453,11 @@ let menuEnteredMs = 0;
  */
 function enterMenu(): void {
   runtime.appMode = 'menu';
+  // The cinematic rig looks back down the road from vantages the chase camera
+  // never takes, so the ribbon has to reach far enough behind the car for its
+  // rear boundary to sit in the fog rather than in shot. Set before
+  // `seedWorldAt` below, which is what builds the chunks.
+  chunks.setBehind(MENU_BEHIND);
   runtime.paused = true;
   input.setEnabled(false);
   // Latched so the offline grant on Continue measures the player's real time
@@ -519,6 +531,9 @@ function startGame(kind: 'continue' | 'new'): void {
   // The player's car again, at the player's speed: drop the showreel override
   // before anything re-seeds the vehicle.
   menuCruiseMph = null;
+  // Hand the menu's long rear tail back: nothing in play ever looks at it, and
+  // `seedWorldAt` below is where the extra chunks stop being built.
+  chunks.setBehind(PLAY_BEHIND);
 
   if (kind === 'new') {
     save.clearSave();

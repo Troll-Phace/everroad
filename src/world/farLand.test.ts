@@ -14,7 +14,7 @@ import {
   farLandHeight,
   farLandRadius,
 } from './farLand';
-import { CHUNK_LEN, TER_COLS } from './chunks';
+import { CHUNK_LEN, PLAY_BEHIND, TER_COLS } from './chunks';
 import { BIOMES, BIOME_LEN, BLEND_LEN, biomeAt, blendColor, createBiomeSample } from './biomes';
 
 const AZIMUTHS = 720;
@@ -24,11 +24,12 @@ const deg = (rad: number): number => (rad * 180) / Math.PI;
 describe('far land placement', () => {
   it('keeps its inner rim inside the terrain ribbon on every side', () => {
     // The rim is only invisible because real terrain is always drawn over it.
-    // The ribbon reaches TER_COLS laterally and BEHIND (3) * CHUNK_LEN behind
-    // the car; the rim has to fit inside the smaller of those.
+    // The ribbon reaches TER_COLS laterally and PLAY_BEHIND * CHUNK_LEN behind
+    // the car — the shorter of the two tails, and so the one that binds; the
+    // rim has to fit inside the smaller of those.
     const lateral = Math.min(Math.abs(TER_COLS[0]), Math.abs(TER_COLS[TER_COLS.length - 1]));
     expect(FAR_LAND_INNER_RADIUS).toBeLessThan(lateral);
-    expect(FAR_LAND_INNER_RADIUS).toBeLessThan(3 * CHUNK_LEN);
+    expect(FAR_LAND_INNER_RADIUS).toBeLessThan(PLAY_BEHIND * CHUNK_LEN);
   });
 
   it('stays inside the sky dome and the camera far plane', () => {
