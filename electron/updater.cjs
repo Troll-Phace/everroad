@@ -72,6 +72,11 @@ function releasePageUrl(version) {
   return `https://github.com/${OWNER}/${REPO}/releases/tag/v${version}`;
 }
 
+/** The API record for one release, which is where its body lives as Markdown. */
+function releaseApiUrl(version) {
+  return `https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/v${version}`;
+}
+
 /**
  * How an update can land on this install.
  *
@@ -80,12 +85,12 @@ function releasePageUrl(version) {
  * guessing from the platform. A Windows user may be running the installer build
  * or the portable .exe, and only one of those can update itself.
  */
-function deliveryMode() {
-  if (process.platform === 'win32') {
-    return process.env.PORTABLE_EXECUTABLE_DIR ? 'manual' : 'in-place';
+function deliveryMode(platform = process.platform, env = process.env) {
+  if (platform === 'win32') {
+    return env.PORTABLE_EXECUTABLE_DIR ? 'manual' : 'in-place';
   }
-  if (process.platform === 'linux') {
-    return process.env.APPIMAGE ? 'in-place' : 'manual';
+  if (platform === 'linux') {
+    return env.APPIMAGE ? 'in-place' : 'manual';
   }
   // darwin, and anything unrecognised.
   return 'manual';
@@ -168,9 +173,16 @@ function fail(what, err) {
  * to object storage). Rejects anything that is not a 2xx, and caps the response
  * so a wrong URL answering with something enormous cannot exhaust memory.
  */
-function fetchBuffer(url, { limitBytes = 512 * 1024 * 1024, onProgress } = {}) {
+function fetchBuffer(url, { limitBytes = 512 * 1024 * 1024, onProgress, headers } = {}) {
   return new Promise((resolve, reject) => {
     const request = net.request({ url, redirect: 'follow' });
+    // api.github.com rejects a request with no User-Agent outright. Electron
+    // sends a Chrome-shaped one by default, but relying on a default for the
+    // difference between 200 and 403 is how this breaks on an Electron bump.
+    request.setHeader('User-Agent', `Everroad/${app.getVersion()}`);
+    for (const [name, value] of Object.entries(headers ?? {})) {
+      request.setHeader(name, value);
+    }
     request.on('response', (response) => {
       if (response.statusCode < 200 || response.statusCode >= 300) {
         // Drain, or the socket is held open until GC.
@@ -198,6 +210,82 @@ function fetchBuffer(url, { limitBytes = 512 * 1024 * 1024, onProgress } = {}) {
     request.on('error', reject);
     request.end();
   });
+}
+
+/**
+ * Filename fragments that identify a build for the architecture we are running.
+ *
+ * Several spellings per arch because the target decides the name, not Node:
+ * electron-builder writes `mac-arm64` and `win-x64`, but `linux-x86_64`.
+ */
+const ARCH_TOKENS = {
+  arm64: ['arm64', 'aarch64'],
+  x64: ['x64', 'x86_64', 'amd64'],
+};
+
+/**
+ * Choose which of the feed's files this machine should actually download.
+ *
+ * Emphatically not `files[0]`, and not the feed's top-level `path` either —
+ * both of those are the *first* entry, and `latest-mac.yml` lists x64 first.
+ * Taking either handed every Apple Silicon user the Intel build: it runs under
+ * Rosetta, so nothing visibly fails, it is just permanently the wrong binary
+ * and 2 MB larger. Found by running the real thing on an arm64 machine.
+ *
+ * This only governs the manual path. On the in-place path electron-updater
+ * resolves the artifact itself, and it gets the arch right.
+ *
+ * On macOS the `.dmg` is preferred over the `.zip` when both match, because the
+ * manual path ends with a human installing the thing by hand and a disk image
+ * with a drag arrow is the convention there.
+ */
+function pickFile(files, platform = process.platform, arch = process.arch) {
+  if (!files || files.length === 0) return null;
+  const tokens = ARCH_TOKENS[arch] ?? [];
+  const named = files.map((file) => ({ file, name: path.basename(file.url) }));
+
+  // An unrecognised arch keeps every candidate rather than none: a wrong-arch
+  // download the user can see the name of beats no download at all.
+  const matching = named.filter(({ name }) => tokens.some((token) => name.includes(token)));
+  const candidates = matching.length > 0 ? matching : named;
+
+  if (platform === 'darwin') {
+    const dmg = candidates.find(({ name }) => name.endsWith('.dmg'));
+    if (dmg) return dmg;
+  }
+  return candidates[0];
+}
+
+/**
+ * The offered release's notes, as the Markdown they were written in.
+ *
+ * Not taken from `updateInfo.releaseNotes`, which is the trap here. On the
+ * GitHub provider that field is an *array* of `{version, note}`, and each
+ * `note` is the HTML GitHub rendered into its Atom feed — `<h3>`, `<ul>`,
+ * `<br>` and entity escapes. Rendering it would mean putting network-sourced
+ * markup into the DOM, which the patch-notes path deliberately never does
+ * (src/ui/markdown.ts), and parsing it would mean a second, HTML-shaped parser
+ * for text that exists in a better form one request away.
+ *
+ * That better form is the release body. `scripts/release-notes.mjs` sets it to
+ * the version's own CHANGELOG.md section at release time, so this returns
+ * exactly the Markdown the What's New panel already renders, from the same
+ * source of truth, through the same parser.
+ *
+ * Null on any failure — the update is still worth offering without its notes.
+ */
+async function fetchReleaseNotes(version) {
+  try {
+    const raw = await fetchBuffer(releaseApiUrl(version), {
+      limitBytes: 1024 * 1024,
+      headers: { Accept: 'application/vnd.github+json' },
+    });
+    const release = JSON.parse(raw.toString('utf8'));
+    return typeof release.body === 'string' && release.body.trim() !== '' ? release.body : null;
+  } catch (err) {
+    console.warn('[updater] could not read the release notes for', version, '-', err);
+    return null;
+  }
 }
 
 /**
@@ -256,14 +344,15 @@ async function check() {
       emit({ phase: 'none', version: null, checkedAt: Date.now() });
       return;
     }
-    // `releaseNotes` is the release body, which is that version's CHANGELOG
-    // section (release.yml extracts it). It can also come back as an array of
-    // per-version objects; only a plain string is rendered.
-    const notes =
-      typeof result.updateInfo.releaseNotes === 'string' ? result.updateInfo.releaseNotes : null;
-    const file = result.updateInfo.files && result.updateInfo.files[0];
-    pendingFile = file ? { version, name: path.basename(file.url), sha512: file.sha512 } : null;
-    const saveVersion = await fetchSaveVersion(version);
+    const picked = pickFile(result.updateInfo.files);
+    pendingFile = picked ? { version, name: picked.name, sha512: picked.file.sha512 } : null;
+    // Both are optional detail about a release we have already decided to
+    // offer, and both fail to null, so they run together rather than adding two
+    // round trips to the check.
+    const [notes, saveVersion] = await Promise.all([
+      fetchReleaseNotes(version),
+      fetchSaveVersion(version),
+    ]);
     busy = false;
     emit({
       phase: 'available',
@@ -429,4 +518,7 @@ function initUpdater(onStatus) {
   return { check, download, install, reveal, openReleasePage, snapshot: () => ({ ...status }) };
 }
 
-module.exports = { initUpdater, deliveryMode };
+// `pickFile` and `deliveryMode` are exported for their unit tests. Both take
+// the platform and arch as parameters precisely so those tests can drive every
+// combination this project ships from one machine.
+module.exports = { initUpdater, deliveryMode, pickFile };
