@@ -13,7 +13,9 @@ import { describe, expect, it } from 'vitest';
 // a require rather than an import. It destructures `electron` at module scope,
 // which outside Electron resolves to a path string — every binding comes back
 // undefined and nothing throws, so the pure helpers below are reachable.
-const { pickFile, deliveryMode } = createRequire(import.meta.url)('./updater.cjs');
+const { pickFile, deliveryMode, linuxPackageFormat } = createRequire(import.meta.url)(
+  './updater.cjs',
+);
 
 /** The macOS feed, in the order `latest-mac.yml` actually lists it. */
 const MAC_FILES = [
@@ -22,6 +24,20 @@ const MAC_FILES = [
   { url: 'Everroad-0.1.17-mac-x64.dmg', sha512: 'c' },
   { url: 'Everroad-0.1.17-mac-arm64.dmg', sha512: 'd' },
 ];
+
+/**
+ * The Linux feed, in the order `latest-linux.yml` actually lists it — both
+ * artifacts carry the same `linux-x86_64` token, which is what let the AppImage
+ * win on an rpm install.
+ */
+const LINUX_FILES = [
+  { url: 'Everroad-0.1.19-linux-x86_64.AppImage', sha512: 'a' },
+  { url: 'Everroad-0.1.19-linux-x86_64.rpm', sha512: 'b' },
+];
+
+/** `fs.existsSync` stubs: a machine with an rpm database, and one without. */
+const hasRpmDb = (p: string): boolean => p === '/var/lib/rpm';
+const noRpmDb = (): boolean => false;
 
 describe('pickFile', () => {
   it('does not hand an Apple Silicon machine the Intel build', () => {
@@ -44,6 +60,38 @@ describe('pickFile', () => {
     expect(pickFile(files, 'linux', 'x64').name).toBe('Everroad-0.1.17-linux-x86_64.AppImage');
   });
 
+  it('hands an rpm install the rpm, not the AppImage listed above it', () => {
+    // The regression this exists for: both files match the arch, the AppImage
+    // is listed first, and an rpm user got a 128 MB file dnf cannot install.
+    expect(pickFile(LINUX_FILES, 'linux', 'x64', {}, hasRpmDb).name).toBe(
+      'Everroad-0.1.19-linux-x86_64.rpm',
+    );
+  });
+
+  it('hands an AppImage install the AppImage even on an rpm-based distro', () => {
+    // Fedora running the AppImage: the rpm database exists, but APPIMAGE is
+    // proof of what is actually running and outranks it.
+    const env = { APPIMAGE: '/home/u/Everroad-0.1.19-linux-x86_64.AppImage' };
+    expect(pickFile(LINUX_FILES, 'linux', 'x64', env, hasRpmDb).name).toBe(
+      'Everroad-0.1.19-linux-x86_64.AppImage',
+    );
+  });
+
+  it('falls back to the AppImage where there is no rpm database to install into', () => {
+    // An extracted AppImage run without its launcher, or a Debian box: handing
+    // back an .rpm would be the same wrong-file bug one step over.
+    expect(pickFile(LINUX_FILES, 'linux', 'x64', {}, noRpmDb).name).toBe(
+      'Everroad-0.1.19-linux-x86_64.AppImage',
+    );
+  });
+
+  it('still returns something on Linux when the feed lists neither format', () => {
+    const odd = [{ url: 'Everroad-0.1.19-linux-x86_64.tar.gz', sha512: 'a' }];
+    expect(pickFile(odd, 'linux', 'x64', {}, hasRpmDb).name).toBe(
+      'Everroad-0.1.19-linux-x86_64.tar.gz',
+    );
+  });
+
   it('falls back to every candidate rather than none on an unknown arch', () => {
     // A wrong-arch download whose name the user can read beats no download.
     expect(pickFile(MAC_FILES, 'darwin', 'ppc64').name).toBe('Everroad-0.1.17-mac-x64.dmg');
@@ -52,6 +100,20 @@ describe('pickFile', () => {
   it('is null when the feed named no files at all', () => {
     expect(pickFile([], 'darwin', 'arm64')).toBeNull();
     expect(pickFile(undefined, 'darwin', 'arm64')).toBeNull();
+  });
+});
+
+describe('linuxPackageFormat', () => {
+  it('trusts APPIMAGE, which the AppImage runtime sets itself', () => {
+    expect(linuxPackageFormat({ APPIMAGE: '/tmp/Everroad.AppImage' }, noRpmDb)).toBe('AppImage');
+  });
+
+  it('reads an install with no APPIMAGE and an rpm database as the rpm build', () => {
+    expect(linuxPackageFormat({}, hasRpmDb)).toBe('rpm');
+  });
+
+  it('defaults to the AppImage, which runs anywhere, when neither signal is present', () => {
+    expect(linuxPackageFormat({}, noRpmDb)).toBe('AppImage');
   });
 });
 

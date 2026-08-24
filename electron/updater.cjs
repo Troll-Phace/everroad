@@ -224,6 +224,23 @@ const ARCH_TOKENS = {
 };
 
 /**
+ * Which Linux package this install came from, and therefore which artifact an
+ * update should hand back.
+ *
+ * `APPIMAGE` is set by the AppImage runtime itself, so it is proof rather than
+ * inference. Everything else is the rpm — those are the only two Linux targets
+ * electron-builder.yml builds — but this checks the rpm database rather than
+ * assuming, because an AppImage that was extracted and run directly does not
+ * get `APPIMAGE` set, and handing that user an `.rpm` would be a second wrong
+ * file for the same reason as the first. When there is no rpm database, the
+ * AppImage is the artifact that runs anywhere, so it is the safer default.
+ */
+function linuxPackageFormat(env = process.env, exists = fs.existsSync) {
+  if (env.APPIMAGE) return 'AppImage';
+  return exists('/var/lib/rpm') ? 'rpm' : 'AppImage';
+}
+
+/**
  * Choose which of the feed's files this machine should actually download.
  *
  * Emphatically not `files[0]`, and not the feed's top-level `path` either —
@@ -238,8 +255,21 @@ const ARCH_TOKENS = {
  * On macOS the `.dmg` is preferred over the `.zip` when both match, because the
  * manual path ends with a human installing the thing by hand and a disk image
  * with a drag arrow is the convention there.
+ *
+ * On Linux the arch token is not enough on its own, which is what made this
+ * function wrong for the rpm. Both Linux artifacts are `linux-x86_64`, so both
+ * survive the arch filter and `candidates[0]` handed every rpm user the
+ * AppImage — a 128 MB file dropped in Downloads that their package manager
+ * cannot install. Exactly the macOS arch bug above, one axis over: the feed
+ * lists more than one artifact per platform, and order is not an answer.
  */
-function pickFile(files, platform = process.platform, arch = process.arch) {
+function pickFile(
+  files,
+  platform = process.platform,
+  arch = process.arch,
+  env = process.env,
+  exists = fs.existsSync,
+) {
   if (!files || files.length === 0) return null;
   const tokens = ARCH_TOKENS[arch] ?? [];
   const named = files.map((file) => ({ file, name: path.basename(file.url) }));
@@ -252,6 +282,11 @@ function pickFile(files, platform = process.platform, arch = process.arch) {
   if (platform === 'darwin') {
     const dmg = candidates.find(({ name }) => name.endsWith('.dmg'));
     if (dmg) return dmg;
+  }
+  if (platform === 'linux') {
+    const wanted = `.${linuxPackageFormat(env, exists)}`;
+    const match = candidates.find(({ name }) => name.toLowerCase().endsWith(wanted.toLowerCase()));
+    if (match) return match;
   }
   return candidates[0];
 }
@@ -521,4 +556,4 @@ function initUpdater(onStatus) {
 // `pickFile` and `deliveryMode` are exported for their unit tests. Both take
 // the platform and arch as parameters precisely so those tests can drive every
 // combination this project ships from one machine.
-module.exports = { initUpdater, deliveryMode, pickFile };
+module.exports = { initUpdater, deliveryMode, pickFile, linuxPackageFormat };
