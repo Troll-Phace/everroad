@@ -5,7 +5,7 @@
  * truth for patch notes. Edit that file and regenerate; `npm run verify` and
  * CI both fail when the two drift apart.
  *
- * 19 release(s), 45 note(s), newest 0.1.18 (2026-08-24).
+ * 20 release(s), 50 note(s), newest 0.1.19 (2026-08-24).
  */
 
 /** One `### ` block of a release: "Added", "Changed", "Fixed", and friends. */
@@ -24,6 +24,22 @@ export interface ChangelogRelease {
 
 /** Newest first. Excludes the [Unreleased] section. */
 export const CHANGELOG: readonly ChangelogRelease[] = [
+  {
+    version: '0.1.19',
+    date: '2026-08-24',
+    sections: [
+      {
+        heading: 'Fixed',
+        items: [
+          "**The desktop game looks right with the internet switched off.** EverRoad's lettering used to be fetched from the web the moment you launched, so starting up on a plane or a dead connection quietly swapped the wordmark, HUD and panels into whatever plain typeface your machine had lying around. The fonts now travel inside the game, and it opens looking like itself whether you are online or not.",
+          "**Two tabs can no longer erase each other's journey.** Leave the game open in a second tab, drive on in the first, and the forgotten tab used to write its hours-old snapshot straight over everything you had earned since. It now notices the road has moved on without it, stops saving rather than overwriting, and tells you to reload to pick up where you really are. The same warning now covers storage that is full or blocked: if your progress has stopped being saved, the game says so instead of going quiet.",
+          '**A save from a newer version is no longer stranded.** Opening an older version has always set a newer save safely aside instead of playing over it — and now hands it straight back the moment you return to a version that can read it, with no rummaging required. If it cannot set that save aside, it stops saving altogether for the session, and New Journey will not erase it — nothing can be written over the journey it is protecting.',
+          '**The weather on the title screen now belongs to the road it is falling on.** Every time the menu picks a fresh car, a fresh stretch of country and a fresh hour of the day, it draws fresh weather to go with it — so leaves no longer drift down over pine ridges or marshland that never had a leaf to shed.',
+          '**The country stops crumpling on the sharpest bends.** Sweep hard through a tight corner and the hills out on the inside used to crease and stack over themselves, with the odd tree left standing on a fold of land instead of on the ground. The land out there now lies the way land lies: no creases, no trees hanging off the scenery, and every roadside thing planted on the hill you can actually see.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.18',
     date: '2026-08-24',
