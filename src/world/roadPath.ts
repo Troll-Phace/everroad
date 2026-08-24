@@ -87,7 +87,10 @@ export class RoadPath {
   }
 
   /** Interpolated centerline pose at s. */
-  pose(s: number, out?: { pos: THREE.Vector3; heading: number }): { pos: THREE.Vector3; heading: number } {
+  pose(
+    s: number,
+    out?: { pos: THREE.Vector3; heading: number },
+  ): { pos: THREE.Vector3; heading: number } {
     this.ensure(s + DS);
     const f = (s - this.baseS) / DS;
     const i = THREE.MathUtils.clamp(Math.floor(f), 0, this.samples.length - 2);

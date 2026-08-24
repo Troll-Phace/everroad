@@ -32,12 +32,44 @@ interface PhaseCfg {
 }
 
 const PHASE_CFG: Record<TimePhase, PhaseCfg> = {
-  dawn: { cutoff: 720, gain: 0.9, sparse: false, chimeMin: 8, chimeMax: 20, chimeOctave: 2, chimeVol: 0.045 },
-  day: { cutoff: 920, gain: 1.0, sparse: false, chimeMin: 8, chimeMax: 20, chimeOctave: 2, chimeVol: 0.045 },
-  sunset: { cutoff: 1250, gain: 1.15, sparse: false, chimeMin: 8, chimeMax: 18, chimeOctave: 2, chimeVol: 0.05 },
+  dawn: {
+    cutoff: 720,
+    gain: 0.9,
+    sparse: false,
+    chimeMin: 8,
+    chimeMax: 20,
+    chimeOctave: 2,
+    chimeVol: 0.045,
+  },
+  day: {
+    cutoff: 920,
+    gain: 1.0,
+    sparse: false,
+    chimeMin: 8,
+    chimeMax: 20,
+    chimeOctave: 2,
+    chimeVol: 0.045,
+  },
+  sunset: {
+    cutoff: 1250,
+    gain: 1.15,
+    sparse: false,
+    chimeMin: 8,
+    chimeMax: 18,
+    chimeOctave: 2,
+    chimeVol: 0.05,
+  },
   // Night: darker filter, sparser voicing, and the chimes become soft
   // high "starlight" plinks arriving a little more often.
-  night: { cutoff: 430, gain: 0.75, sparse: true, chimeMin: 6, chimeMax: 14, chimeOctave: 3, chimeVol: 0.03 },
+  night: {
+    cutoff: 430,
+    gain: 0.75,
+    sparse: true,
+    chimeMin: 6,
+    chimeMax: 14,
+    chimeOctave: 3,
+    chimeVol: 0.03,
+  },
 };
 
 /** Total pad level; individual notes are scaled down by voice count. */
@@ -60,7 +92,7 @@ export interface MusicLayer {
 export function createMusicLayer(
   ctx: BaseAudioContext,
   out: AudioNode,
-  initial: BiomePalette
+  initial: BiomePalette,
 ): MusicLayer {
   let palette = initial;
   let phase: TimePhase = 'day';
@@ -237,7 +269,10 @@ export function createMusicLayer(
     update(now: number): void {
       if (now >= nextChordTime) {
         // Mostly walk the progression; sometimes sit on a chord's neighbor.
-        chordIdx = Math.random() < 0.85 ? (chordIdx + 1) % palette.chords.length : (Math.random() * palette.chords.length) | 0;
+        chordIdx =
+          Math.random() < 0.85
+            ? (chordIdx + 1) % palette.chords.length
+            : (Math.random() * palette.chords.length) | 0;
         changeChord(8, 6);
       }
       if (now >= nextChimeTime) {

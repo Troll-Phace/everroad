@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
-  "description": "Everroad — an idle infinite driving game. Drive through a painted countryside forever.",
+  "description": "Everroad \u2014 an idle infinite driving game. Drive through a painted countryside forever.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -11,9 +11,10 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "verify": "tsc --noEmit && vitest run && vite build",
+    "verify": "tsc --noEmit && vitest run && vite build && node scripts/check-bundle-size.mjs",
     "format": "prettier --write",
-    "format:check": "prettier --check \"src/**/*.{ts,css}\""
+    "format:check": "prettier --check \"src/**/*.{ts,css}\" \"scripts/**/*.mjs\"",
+    "size": "node scripts/check-bundle-size.mjs"
   },
   "dependencies": {
     "postprocessing": "^6.36.4",

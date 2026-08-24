@@ -30,7 +30,10 @@ export class PanelManager {
   private updater: (() => void) | null = null;
   private updateTimer = 0;
 
-  constructor(private deps: UIDeps, root: HTMLElement) {
+  constructor(
+    private deps: UIDeps,
+    root: HTMLElement,
+  ) {
     this.layer = el('div', 'panel-layer hidden');
     root.append(this.layer);
     // Click on the dimmed backdrop closes the panel.

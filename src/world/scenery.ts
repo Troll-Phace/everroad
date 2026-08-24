@@ -100,7 +100,16 @@ function buildProto(parts: Part[], radius: number, height: number, seed = 7): Pr
 
 const IDENTITY = new THREE.Matrix4();
 
-function mat(x: number, y: number, z: number, sx = 1, sy = 1, sz = 1, ry = 0, rz = 0): THREE.Matrix4 {
+function mat(
+  x: number,
+  y: number,
+  z: number,
+  sx = 1,
+  sy = 1,
+  sz = 1,
+  ry = 0,
+  rz = 0,
+): THREE.Matrix4 {
   return new THREE.Matrix4().compose(
     new THREE.Vector3(x, y, z),
     new THREE.Quaternion().setFromEuler(new THREE.Euler(0, ry, rz)),
@@ -137,58 +146,180 @@ function buildInner(kind: SceneryKind): Proto {
     case 'oak':
       return buildProto(
         [
-          { geo: new THREE.CylinderGeometry(0.28, 0.45, 2.4, 6), matrix: mat(0, 1.2, 0), bakedColor: TRUNK },
-          { geo: blob(1.9), matrix: mat(0, 3.6, 0, 1, 0.92, 1), instanceTint: true, jitter: 0.34, shadeFn: canopyShade(1.8, 5.4) },
-          { geo: blob(1.25), matrix: mat(1.15, 2.9, 0.4), instanceTint: true, jitter: 0.3, shadeFn: canopyShade(1.6, 4.2) },
-          { geo: blob(1.1), matrix: mat(-1.05, 3.1, -0.35), instanceTint: true, jitter: 0.28, shadeFn: canopyShade(1.8, 4.3) },
+          {
+            geo: new THREE.CylinderGeometry(0.28, 0.45, 2.4, 6),
+            matrix: mat(0, 1.2, 0),
+            bakedColor: TRUNK,
+          },
+          {
+            geo: blob(1.9),
+            matrix: mat(0, 3.6, 0, 1, 0.92, 1),
+            instanceTint: true,
+            jitter: 0.34,
+            shadeFn: canopyShade(1.8, 5.4),
+          },
+          {
+            geo: blob(1.25),
+            matrix: mat(1.15, 2.9, 0.4),
+            instanceTint: true,
+            jitter: 0.3,
+            shadeFn: canopyShade(1.6, 4.2),
+          },
+          {
+            geo: blob(1.1),
+            matrix: mat(-1.05, 3.1, -0.35),
+            instanceTint: true,
+            jitter: 0.28,
+            shadeFn: canopyShade(1.8, 4.3),
+          },
         ],
-        2.4, 5.5, 11,
+        2.4,
+        5.5,
+        11,
       );
     case 'maple':
       return buildProto(
         [
-          { geo: new THREE.CylinderGeometry(0.24, 0.4, 3.0, 6), matrix: mat(0, 1.5, 0), bakedColor: TRUNK },
-          { geo: blob(2.2), matrix: mat(0, 4.6, 0, 1, 1.05, 1), instanceTint: true, jitter: 0.42, shadeFn: canopyShade(2.4, 7.0) },
-          { geo: blob(1.35), matrix: mat(1.3, 3.6, 0.5), instanceTint: true, jitter: 0.34, shadeFn: canopyShade(2.2, 5.0) },
-          { geo: blob(1.2), matrix: mat(-1.25, 3.9, -0.4), instanceTint: true, jitter: 0.32, shadeFn: canopyShade(2.4, 5.2) },
+          {
+            geo: new THREE.CylinderGeometry(0.24, 0.4, 3.0, 6),
+            matrix: mat(0, 1.5, 0),
+            bakedColor: TRUNK,
+          },
+          {
+            geo: blob(2.2),
+            matrix: mat(0, 4.6, 0, 1, 1.05, 1),
+            instanceTint: true,
+            jitter: 0.42,
+            shadeFn: canopyShade(2.4, 7.0),
+          },
+          {
+            geo: blob(1.35),
+            matrix: mat(1.3, 3.6, 0.5),
+            instanceTint: true,
+            jitter: 0.34,
+            shadeFn: canopyShade(2.2, 5.0),
+          },
+          {
+            geo: blob(1.2),
+            matrix: mat(-1.25, 3.9, -0.4),
+            instanceTint: true,
+            jitter: 0.32,
+            shadeFn: canopyShade(2.4, 5.2),
+          },
         ],
-        2.6, 6.9, 13,
+        2.6,
+        6.9,
+        13,
       );
     case 'pine':
       return buildProto(
         [
-          { geo: new THREE.CylinderGeometry(0.22, 0.34, 1.6, 6), matrix: mat(0, 0.8, 0), bakedColor: TRUNK },
-          { geo: new THREE.ConeGeometry(2.0, 2.6, 7), matrix: mat(0, 2.4, 0), instanceTint: true, smooth: true, shadeFn: canopyShade(1.1, 3.7) },
-          { geo: new THREE.ConeGeometry(1.5, 2.3, 7), matrix: mat(0, 4.0, 0), instanceTint: true, smooth: true, shadeFn: canopyShade(2.9, 5.2) },
-          { geo: new THREE.ConeGeometry(1.0, 2.0, 7), matrix: mat(0, 5.5, 0), instanceTint: true, smooth: true, shadeFn: canopyShade(4.5, 6.5) },
+          {
+            geo: new THREE.CylinderGeometry(0.22, 0.34, 1.6, 6),
+            matrix: mat(0, 0.8, 0),
+            bakedColor: TRUNK,
+          },
+          {
+            geo: new THREE.ConeGeometry(2.0, 2.6, 7),
+            matrix: mat(0, 2.4, 0),
+            instanceTint: true,
+            smooth: true,
+            shadeFn: canopyShade(1.1, 3.7),
+          },
+          {
+            geo: new THREE.ConeGeometry(1.5, 2.3, 7),
+            matrix: mat(0, 4.0, 0),
+            instanceTint: true,
+            smooth: true,
+            shadeFn: canopyShade(2.9, 5.2),
+          },
+          {
+            geo: new THREE.ConeGeometry(1.0, 2.0, 7),
+            matrix: mat(0, 5.5, 0),
+            instanceTint: true,
+            smooth: true,
+            shadeFn: canopyShade(4.5, 6.5),
+          },
         ],
-        2.1, 6.5, 17,
+        2.1,
+        6.5,
+        17,
       );
     case 'poplar':
       return buildProto(
         [
-          { geo: new THREE.CylinderGeometry(0.2, 0.3, 1.6, 6), matrix: mat(0, 0.8, 0), bakedColor: TRUNK_LIGHT },
-          { geo: blob(1.4), matrix: mat(0, 4.2, 0, 1, 2.5, 1), instanceTint: true, jitter: 0.3, shadeFn: canopyShade(1.0, 7.6) },
+          {
+            geo: new THREE.CylinderGeometry(0.2, 0.3, 1.6, 6),
+            matrix: mat(0, 0.8, 0),
+            bakedColor: TRUNK_LIGHT,
+          },
+          {
+            geo: blob(1.4),
+            matrix: mat(0, 4.2, 0, 1, 2.5, 1),
+            instanceTint: true,
+            jitter: 0.3,
+            shadeFn: canopyShade(1.0, 7.6),
+          },
         ],
-        1.6, 7.7, 19,
+        1.6,
+        7.7,
+        19,
       );
     case 'cherryTree':
       return buildProto(
         [
-          { geo: new THREE.CylinderGeometry(0.26, 0.42, 2.2, 6), matrix: mat(0, 1.1, 0, 1, 1, 1, 0, 0.12), bakedColor: '#6b4a3a' },
-          { geo: blob(2.1), matrix: mat(0, 3.6, 0, 1.25, 0.78, 1.25), instanceTint: true, jitter: 0.4, shadeFn: canopyShade(2.0, 5.0) },
-          { geo: blob(1.2), matrix: mat(1.5, 3.1, 0.5, 1.1, 0.75, 1.1), instanceTint: true, jitter: 0.3, shadeFn: canopyShade(1.9, 4.1) },
-          { geo: blob(1.05), matrix: mat(-1.4, 3.3, -0.4, 1.1, 0.7, 1.1), instanceTint: true, jitter: 0.3, shadeFn: canopyShade(2.1, 4.2) },
+          {
+            geo: new THREE.CylinderGeometry(0.26, 0.42, 2.2, 6),
+            matrix: mat(0, 1.1, 0, 1, 1, 1, 0, 0.12),
+            bakedColor: '#6b4a3a',
+          },
+          {
+            geo: blob(2.1),
+            matrix: mat(0, 3.6, 0, 1.25, 0.78, 1.25),
+            instanceTint: true,
+            jitter: 0.4,
+            shadeFn: canopyShade(2.0, 5.0),
+          },
+          {
+            geo: blob(1.2),
+            matrix: mat(1.5, 3.1, 0.5, 1.1, 0.75, 1.1),
+            instanceTint: true,
+            jitter: 0.3,
+            shadeFn: canopyShade(1.9, 4.1),
+          },
+          {
+            geo: blob(1.05),
+            matrix: mat(-1.4, 3.3, -0.4, 1.1, 0.7, 1.1),
+            instanceTint: true,
+            jitter: 0.3,
+            shadeFn: canopyShade(2.1, 4.2),
+          },
         ],
-        2.7, 4.9, 23,
+        2.7,
+        4.9,
+        23,
       );
     case 'rock':
       return buildProto(
         [
-          { geo: new THREE.IcosahedronGeometry(0.9, 0), matrix: mat(0, 0.42, 0, 1.25, 0.8, 1.0), instanceTint: true, jitter: 0.22, shadeFn: (_x, y) => 0.8 + y * 0.3 },
-          { geo: new THREE.IcosahedronGeometry(0.55, 0), matrix: mat(0.9, 0.25, 0.3, 1, 0.75, 1), instanceTint: true, jitter: 0.16, shadeFn: (_x, y) => 0.8 + y * 0.3 },
+          {
+            geo: new THREE.IcosahedronGeometry(0.9, 0),
+            matrix: mat(0, 0.42, 0, 1.25, 0.8, 1.0),
+            instanceTint: true,
+            jitter: 0.22,
+            shadeFn: (_x, y) => 0.8 + y * 0.3,
+          },
+          {
+            geo: new THREE.IcosahedronGeometry(0.55, 0),
+            matrix: mat(0.9, 0.25, 0.3, 1, 0.75, 1),
+            instanceTint: true,
+            jitter: 0.16,
+            shadeFn: (_x, y) => 0.8 + y * 0.3,
+          },
         ],
-        1.4, 1.2, 29,
+        1.4,
+        1.2,
+        29,
       );
     case 'flowers': {
       const parts: Part[] = [];
@@ -197,8 +328,17 @@ function buildInner(kind: SceneryKind): Proto {
         const x = (r() - 0.5) * 1.6;
         const z = (r() - 0.5) * 1.6;
         const h = 0.5 + r() * 0.35;
-        parts.push({ geo: new THREE.CylinderGeometry(0.03, 0.04, h, 4), matrix: mat(x, h / 2, z), bakedColor: '#5da84e' });
-        parts.push({ geo: blob(0.16), matrix: mat(x, h + 0.08, z), instanceTint: true, shadeFn: () => 1.1 });
+        parts.push({
+          geo: new THREE.CylinderGeometry(0.03, 0.04, h, 4),
+          matrix: mat(x, h / 2, z),
+          bakedColor: '#5da84e',
+        });
+        parts.push({
+          geo: blob(0.16),
+          matrix: mat(x, h + 0.08, z),
+          instanceTint: true,
+          shadeFn: () => 1.1,
+        });
       }
       return buildProto(parts, 1.0, 0.9, 31);
     }
@@ -221,28 +361,66 @@ function buildInner(kind: SceneryKind): Proto {
     case 'hay':
       return buildProto(
         [
-          { geo: new THREE.CylinderGeometry(0.85, 0.85, 1.5, 10), matrix: mat(0, 0.85, 0, 1, 1, 1, 0, Math.PI / 2), bakedColor: '#e0b95c', smooth: true, shadeFn: (_x, y) => 0.78 + y * 0.32 },
+          {
+            geo: new THREE.CylinderGeometry(0.85, 0.85, 1.5, 10),
+            matrix: mat(0, 0.85, 0, 1, 1, 1, 0, Math.PI / 2),
+            bakedColor: '#e0b95c',
+            smooth: true,
+            shadeFn: (_x, y) => 0.78 + y * 0.32,
+          },
         ],
-        1.5, 1.7, 41,
+        1.5,
+        1.7,
+        41,
       );
     case 'fence': {
       const parts: Part[] = [];
       for (let i = 0; i < 3; i++) {
-        parts.push({ geo: new THREE.BoxGeometry(0.14, 1.1, 0.14), matrix: mat(-2 + i * 2, 0.55, 0), bakedColor: '#8a6142' });
+        parts.push({
+          geo: new THREE.BoxGeometry(0.14, 1.1, 0.14),
+          matrix: mat(-2 + i * 2, 0.55, 0),
+          bakedColor: '#8a6142',
+        });
       }
-      parts.push({ geo: new THREE.BoxGeometry(4.3, 0.1, 0.08), matrix: mat(0, 0.85, 0), bakedColor: '#9c7250' });
-      parts.push({ geo: new THREE.BoxGeometry(4.3, 0.1, 0.08), matrix: mat(0, 0.45, 0), bakedColor: '#9c7250' });
+      parts.push({
+        geo: new THREE.BoxGeometry(4.3, 0.1, 0.08),
+        matrix: mat(0, 0.85, 0),
+        bakedColor: '#9c7250',
+      });
+      parts.push({
+        geo: new THREE.BoxGeometry(4.3, 0.1, 0.08),
+        matrix: mat(0, 0.45, 0),
+        bakedColor: '#9c7250',
+      });
       return buildProto(parts, 2.2, 1.1, 43);
     }
     case 'windmill':
       return buildProto(
         [
-          { geo: new THREE.CylinderGeometry(0.9, 1.6, 9, 7), matrix: mat(0, 4.5, 0), bakedColor: '#e8ddc8' },
-          { geo: new THREE.ConeGeometry(1.15, 1.6, 7), matrix: mat(0, 9.7, 0), bakedColor: '#a06a4a' },
-          { geo: new THREE.BoxGeometry(0.28, 7.4, 0.06), matrix: mat(0, 8.6, 1.15, 1, 1, 1, 0, 0.6), bakedColor: '#8a6142' },
-          { geo: new THREE.BoxGeometry(7.4, 0.28, 0.06), matrix: mat(0, 8.6, 1.15, 1, 1, 1, 0, 0.6), bakedColor: '#8a6142' },
+          {
+            geo: new THREE.CylinderGeometry(0.9, 1.6, 9, 7),
+            matrix: mat(0, 4.5, 0),
+            bakedColor: '#e8ddc8',
+          },
+          {
+            geo: new THREE.ConeGeometry(1.15, 1.6, 7),
+            matrix: mat(0, 9.7, 0),
+            bakedColor: '#a06a4a',
+          },
+          {
+            geo: new THREE.BoxGeometry(0.28, 7.4, 0.06),
+            matrix: mat(0, 8.6, 1.15, 1, 1, 1, 0, 0.6),
+            bakedColor: '#8a6142',
+          },
+          {
+            geo: new THREE.BoxGeometry(7.4, 0.28, 0.06),
+            matrix: mat(0, 8.6, 1.15, 1, 1, 1, 0, 0.6),
+            bakedColor: '#8a6142',
+          },
         ],
-        2.2, 10.4, 47,
+        2.2,
+        10.4,
+        47,
       );
     case 'sunflowerPatch': {
       const parts: Part[] = [];
@@ -251,8 +429,17 @@ function buildInner(kind: SceneryKind): Proto {
         const x = (r() - 0.5) * 2.6;
         const z = (r() - 0.5) * 2.6;
         const h = 1.1 + r() * 0.5;
-        parts.push({ geo: new THREE.CylinderGeometry(0.04, 0.05, h, 4), matrix: mat(x, h / 2, z), bakedColor: '#4e9440' });
-        parts.push({ geo: blob(0.24), matrix: mat(x, h + 0.1, z, 1, 0.6, 1), instanceTint: true, shadeFn: () => 1.15 });
+        parts.push({
+          geo: new THREE.CylinderGeometry(0.04, 0.05, h, 4),
+          matrix: mat(x, h / 2, z),
+          bakedColor: '#4e9440',
+        });
+        parts.push({
+          geo: blob(0.24),
+          matrix: mat(x, h + 0.1, z, 1, 0.6, 1),
+          instanceTint: true,
+          shadeFn: () => 1.15,
+        });
         parts.push({ geo: blob(0.09), matrix: mat(x, h + 0.16, z), bakedColor: '#7a4a26' });
       }
       return buildProto(parts, 1.7, 1.7, 53);

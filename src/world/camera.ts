@@ -37,7 +37,10 @@ export class ChaseCamera {
     this.pos.y = THREE.MathUtils.damp(this.pos.y, targetPos.y, 3.4, dt);
     this.pos.z = THREE.MathUtils.damp(this.pos.z, targetPos.z, 4.2, dt);
 
-    const lookTarget = tmpC.copy(car.position).addScaledVector(back, -7).add(tmpB.set(0, 1.6, 0));
+    const lookTarget = tmpC
+      .copy(car.position)
+      .addScaledVector(back, -7)
+      .add(tmpB.set(0, 1.6, 0));
     this.look.lerp(lookTarget, 1 - Math.exp(-6 * dt));
 
     this.camera.position.copy(this.pos);

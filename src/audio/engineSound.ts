@@ -17,7 +17,7 @@ export interface EngineLayer {
 export function createEngineLayer(
   ctx: BaseAudioContext,
   out: AudioNode,
-  buffers: { brown: AudioBuffer; white: AudioBuffer }
+  buffers: { brown: AudioBuffer; white: AudioBuffer },
 ): EngineLayer {
   // --- rumble bed: brown noise -> heavy lowpass ----------------------------
   const bed = loopingNoise(ctx, buffers.brown, out);

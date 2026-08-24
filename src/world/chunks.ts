@@ -27,9 +27,7 @@ interface Chunk {
 export function terrainHeight(path: RoadPath, s: number, lat: number): number {
   const roadY = path.elevation(s);
   const a = Math.abs(lat);
-  const hills =
-    noise2(s * 0.006, lat * 0.011) * 7 +
-    noise2(s * 0.0016, lat * 0.0028) * 16;
+  const hills = noise2(s * 0.006, lat * 0.011) * 7 + noise2(s * 0.0016, lat * 0.0028) * 16;
   const far = THREE.MathUtils.smoothstep(a, 55, 160);
   const rise = far * (10 + noise2(s * 0.001, lat * 0.002) * 14);
   const blendK = THREE.MathUtils.smoothstep(a, 6.2, 30);
@@ -39,7 +37,20 @@ export function terrainHeight(path: RoadPath, s: number, lat: number): number {
 // Road cross-section: lateral offsets + which paint each column carries.
 const ROAD_COLS = [-5.5, -4.65, -4.35, -4.05, -0.5, -0.16, 0.16, 0.5, 4.05, 4.35, 4.65, 5.5];
 type Paint = 'dirt' | 'asphalt' | 'edge' | 'dash';
-const ROAD_PAINT: Paint[] = ['dirt', 'asphalt', 'edge', 'asphalt', 'asphalt', 'dash', 'dash', 'asphalt', 'asphalt', 'edge', 'asphalt', 'dirt'];
+const ROAD_PAINT: Paint[] = [
+  'dirt',
+  'asphalt',
+  'edge',
+  'asphalt',
+  'asphalt',
+  'dash',
+  'dash',
+  'asphalt',
+  'asphalt',
+  'edge',
+  'asphalt',
+  'dirt',
+];
 
 const COL_DIRT = new THREE.Color('#96795a');
 const COL_ASPHALT = new THREE.Color('#4d4d5c');
@@ -54,7 +65,10 @@ export class ChunkManager {
   private mat = vertexToonMat();
   readonly root = new THREE.Group();
 
-  constructor(private path: RoadPath, private scene: THREE.Scene) {
+  constructor(
+    private path: RoadPath,
+    private scene: THREE.Scene,
+  ) {
     scene.add(this.root);
   }
 
@@ -222,7 +236,9 @@ export class ChunkManager {
     obstacles: Obstacle[],
   ): THREE.Mesh | null {
     const r = rng((index * 2654435761) % 4294967291);
-    const count = Math.round(blendNumber(s0 + CHUNK_LEN / 2, (b) => b.density) * (0.85 + r() * 0.3));
+    const count = Math.round(
+      blendNumber(s0 + CHUNK_LEN / 2, (b) => b.density) * (0.85 + r() * 0.3),
+    );
 
     const posOut: number[] = [];
     const normOut: number[] = [];
@@ -263,11 +279,18 @@ export class ChunkManager {
       }
 
       let scale =
-        kind === 'windmill' ? 0.9 + r() * 0.4 :
-        kind === 'rock' ? 0.6 + r() * 1.1 :
-        0.75 + r() * 0.6;
+        kind === 'windmill'
+          ? 0.9 + r() * 0.4
+          : kind === 'rock'
+            ? 0.6 + r() * 1.1
+            : 0.75 + r() * 0.6;
       // Keep trees hugging the road smaller so canopies never swallow the camera.
-      const isTree = kind === 'oak' || kind === 'maple' || kind === 'pine' || kind === 'poplar' || kind === 'cherryTree';
+      const isTree =
+        kind === 'oak' ||
+        kind === 'maple' ||
+        kind === 'pine' ||
+        kind === 'poplar' ||
+        kind === 'cherryTree';
       if (isTree && Math.abs(lat) < 17) scale = Math.min(scale, 0.9);
 
       // Rows and fences align with the road; everything else spins freely.
@@ -284,13 +307,20 @@ export class ChunkManager {
       pickTint(s, kind, r, tint);
 
       q.setFromEuler(eul.set(0, yaw, 0));
-      m.compose(vec.set(worldP.x - anchor.x, y - 0.12, worldP.z - anchor.z), q, tmpScale.setScalar(scale));
+      m.compose(
+        vec.set(worldP.x - anchor.x, y - 0.12, worldP.z - anchor.z),
+        q,
+        tmpScale.setScalar(scale),
+      );
       nm.getNormalMatrix(m);
 
       const { pos, norm, baked, shade, mask, vertexCount, radius } = proto;
       for (let vI = 0; vI < vertexCount; vI++) {
         vec.set(pos[vI * 3], pos[vI * 3 + 1], pos[vI * 3 + 2]).applyMatrix4(m);
-        nrm.set(norm[vI * 3], norm[vI * 3 + 1], norm[vI * 3 + 2]).applyMatrix3(nm).normalize();
+        nrm
+          .set(norm[vI * 3], norm[vI * 3 + 1], norm[vI * 3 + 2])
+          .applyMatrix3(nm)
+          .normalize();
         posOut.push(vec.x, vec.y, vec.z);
         normOut.push(nrm.x, nrm.y, nrm.z);
         const sh = shade[vI];
@@ -358,8 +388,12 @@ function gridIndices(rows: number, cols: number): THREE.BufferAttribute {
       const c = a + cols;
       const d = c + 1;
       // Winding chosen so faces point up with the right-hand lateral axis.
-      idx[k++] = a; idx[k++] = b; idx[k++] = c;
-      idx[k++] = b; idx[k++] = d; idx[k++] = c;
+      idx[k++] = a;
+      idx[k++] = b;
+      idx[k++] = c;
+      idx[k++] = b;
+      idx[k++] = d;
+      idx[k++] = c;
     }
   }
   return new THREE.BufferAttribute(idx, 1);
