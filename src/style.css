@@ -3,6 +3,9 @@
   --font-ui: 'Quicksand', system-ui, sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   --glass-bg: rgba(20, 24, 38, 0.42);
+  /* Heavier glass for full-bleed surfaces that carry text straight over the
+     live world (main-menu buttons) rather than sitting inside a panel. */
+  --glass-bg-strong: rgba(14, 16, 30, 0.62);
   --glass-border: rgba(255, 255, 255, 0.14);
   --glass-blur: 14px;
   --text-main: rgba(255, 255, 255, 0.94);
@@ -10,6 +13,11 @@
   --accent: #ffb26b; /* biome-tinted at runtime */
   --accent-soft: rgba(255, 178, 107, 0.25);
   --radius: 14px;
+  /* Scrim base, as raw channels so gradients can vary the alpha per stop. */
+  --scrim-rgb: 6, 6, 16;
+  /* Title-screen ink: the loading screen's warm white, reused by the menu. */
+  --menu-ink: #fff7ec;
+  --menu-ink-dim: rgba(255, 247, 236, 0.78);
 }
 
 * {
@@ -91,4 +99,25 @@ body {
   border-radius: 2px;
   background: #fff7ec;
   transition: width 0.3s ease;
+}
+
+/* ---------- mode fade ----------
+   startGame()/quitToMenu() are instantaneous; this cover is the whole visible
+   transition. Sits above the UI overlay and below the loading screen. Timing
+   and class toggling live in src/ui/transition.ts. */
+.mode-cover {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: #05040c;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 320ms ease;
+}
+.mode-cover.is-active {
+  /* Swallows clicks for the whole run, so nothing can be double-fired. */
+  pointer-events: auto;
+}
+.mode-cover.is-opaque {
+  opacity: 1;
 }

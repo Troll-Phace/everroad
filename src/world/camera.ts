@@ -15,7 +15,12 @@ export class ChaseCamera {
     this.camera.position.copy(this.pos);
   }
 
-  update(vehicle: Vehicle, dt: number): void {
+  /**
+   * Steady-state chase pose for the vehicle's current position and yaw.
+   * Writes `outPos`/`outLook` and returns the 0..1 speed factor the rig's
+   * distance, height and FOV all key off. Uses `tmpB` as scratch.
+   */
+  private rig(vehicle: Vehicle, outPos: THREE.Vector3, outLook: THREE.Vector3): number {
     const car = vehicle.root;
 
     // Fixed chase rig: always directly behind + above; distance breathes
@@ -25,30 +30,49 @@ export class ChaseCamera {
     const height = 4.1 + speedK * 0.8;
 
     const heading = vehicle.yaw; // true yaw (rotation.y is Euler-clamped)
-    const back = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading));
+    const back = tmpB.set(-Math.sin(heading), 0, -Math.cos(heading));
 
-    const targetPos = tmpA
-      .copy(car.position)
-      .addScaledVector(back, dist)
-      .add(tmpB.set(0, height, 0));
+    outPos.copy(car.position).addScaledVector(back, dist);
+    outPos.y += height;
+    outLook.copy(car.position).addScaledVector(back, -7);
+    outLook.y += 1.6;
+    return speedK;
+  }
+
+  /** FOV the rig settles on at this speed. */
+  private rigFov(vehicle: Vehicle, speedK: number): number {
+    return 58 + speedK * 10 + (vehicle.isDrifting ? 3 : 0);
+  }
+
+  update(vehicle: Vehicle, dt: number): void {
+    const speedK = this.rig(vehicle, tmpA, tmpC);
 
     // Critically damped follow.
-    this.pos.x = THREE.MathUtils.damp(this.pos.x, targetPos.x, 4.2, dt);
-    this.pos.y = THREE.MathUtils.damp(this.pos.y, targetPos.y, 3.4, dt);
-    this.pos.z = THREE.MathUtils.damp(this.pos.z, targetPos.z, 4.2, dt);
+    this.pos.x = THREE.MathUtils.damp(this.pos.x, tmpA.x, 4.2, dt);
+    this.pos.y = THREE.MathUtils.damp(this.pos.y, tmpA.y, 3.4, dt);
+    this.pos.z = THREE.MathUtils.damp(this.pos.z, tmpA.z, 4.2, dt);
 
-    const lookTarget = tmpC
-      .copy(car.position)
-      .addScaledVector(back, -7)
-      .add(tmpB.set(0, 1.6, 0));
-    this.look.lerp(lookTarget, 1 - Math.exp(-6 * dt));
+    this.look.lerp(tmpC, 1 - Math.exp(-6 * dt));
 
     this.camera.position.copy(this.pos);
     this.camera.lookAt(this.look);
 
     // Speed-based FOV kick.
-    const targetFov = 58 + speedK * 10 + (vehicle.isDrifting ? 3 : 0);
-    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, targetFov, 3, dt);
+    this.camera.fov = THREE.MathUtils.damp(this.camera.fov, this.rigFov(vehicle, speedK), 3, dt);
+    this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Hard-set the rig to its steady-state pose for the vehicle right now, with
+   * no damping. Called when leaving the main menu (docs/ARCHITECTURE.md §4.1):
+   * without it the chase rig would lerp in from wherever the cinematic menu
+   * camera left off, which reads as a swoop rather than a cut.
+   */
+  snapTo(vehicle: Vehicle): void {
+    const speedK = this.rig(vehicle, this.pos, this.look);
+    this.camera.position.copy(this.pos);
+    this.camera.lookAt(this.look);
+    this.camera.fov = this.rigFov(vehicle, speedK);
     this.camera.updateProjectionMatrix();
   }
 

@@ -98,6 +98,13 @@ export function initHUD(deps: UIDeps, root: HTMLElement): void {
   let lastComboPct = -1;
 
   function frame(): void {
+    // Attract mode hides the whole HUD in CSS; there is nothing to update and
+    // no state worth reading, so skip the frame's work entirely.
+    if (runtime.appMode !== 'playing') {
+      requestAnimationFrame(frame);
+      return;
+    }
+
     const c = state.currencies;
     const s = state.stats;
 

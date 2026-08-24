@@ -20,6 +20,17 @@ export interface PanelDef {
 
 const UPDATE_INTERVAL_MS = 250;
 
+/**
+ * What counts as tabbable inside a panel card, for the focus trap. Matches the
+ * controls the panels actually build — buttons, the save-code textarea, the
+ * settings sliders and selects — plus anything that opted into the tab order.
+ */
+const FOCUSABLE =
+  'a[href], button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])';
+
+/** Ties a card to its own heading for `aria-labelledby`. One panel is open at a time. */
+const PANEL_TITLE_ID = 'panel-card-title';
+
 export class PanelManager {
   current: string | null = null;
 
@@ -29,6 +40,8 @@ export class PanelManager {
   private content: HTMLElement | null = null;
   private updater: (() => void) | null = null;
   private updateTimer = 0;
+  /** Where focus was when the panel opened, so closing hands it back. */
+  private returnFocus: HTMLElement | null = null;
 
   constructor(
     private deps: UIDeps,
@@ -40,6 +53,11 @@ export class PanelManager {
     this.layer.addEventListener('click', (e) => {
       if (e.target === this.layer) this.close();
     });
+    // A panel is a modal dialog: while one is up, Tab cycles inside it instead
+    // of walking out into whatever sits behind (the main menu's action slabs,
+    // most visibly). The listener sits on the layer because focus is always
+    // inside the card, so the keydown bubbles through here.
+    this.layer.addEventListener('keydown', (e) => this.trapTab(e));
     // Purchases / car swaps re-render whatever panel is open so costs,
     // levels and ownership states stay honest.
     deps.bus.on('purchase', () => this.refresh());
@@ -61,9 +79,20 @@ export class PanelManager {
     if (!def) return;
     this.teardown();
 
+    this.returnFocus =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
+
     const card = el('div', 'panel-glass panel-card panel-in');
+    // Focusable so opening the panel can move focus into it. Without this the
+    // player's focus stayed on the control behind the card — on the menu, that
+    // meant Enter still fired Continue through an open Settings panel.
+    card.tabIndex = -1;
+    card.setAttribute('role', 'dialog');
+    card.setAttribute('aria-modal', 'true');
+    card.setAttribute('aria-labelledby', PANEL_TITLE_ID);
     const header = el('div', 'panel-header');
     const title = el('h2', 'panel-title', def.title);
+    title.id = PANEL_TITLE_ID;
     const hints = el('div', 'panel-hints');
     if (def.key !== 'Esc') hints.append(el('span', 'key-hint', def.key));
     hints.append(el('span', 'key-hint', 'Esc'));
@@ -83,16 +112,22 @@ export class PanelManager {
     this.content = content;
     this.current = id;
     document.body.dataset.panel = id;
+    card.focus({ preventScroll: true });
     this.deps.bus.emit('uiPanelChange', { panel: id });
   }
 
   close(): void {
     if (this.current === null) return;
+    const returnFocus = this.returnFocus;
+    this.returnFocus = null;
     this.teardown();
     this.layer.classList.add('hidden');
     this.current = null;
     delete document.body.dataset.panel;
+    // Emit first: listeners un-inert what the panel was covering, and focus
+    // cannot land on an inert element.
     this.deps.bus.emit('uiPanelChange', { panel: null });
+    if (returnFocus?.isConnected) returnFocus.focus({ preventScroll: true });
   }
 
   /** Re-render the open panel in place, preserving scroll position. */
@@ -109,6 +144,32 @@ export class PanelManager {
       this.updateTimer = window.setInterval(this.updater, UPDATE_INTERVAL_MS);
     }
     this.content.scrollTop = scroll;
+  }
+
+  /** Wrap Tab / Shift+Tab around the open card's own controls. */
+  private trapTab(e: KeyboardEvent): void {
+    if (e.key !== 'Tab' || this.card === null) return;
+    const card = this.card;
+    // `offsetParent` is null for a `display: none` control (locked rows, the
+    // gameplay-only quit block), which must not be a tab stop.
+    const items = Array.from(card.querySelectorAll<HTMLElement>(FOCUSABLE)).filter(
+      (node) => node.offsetParent !== null,
+    );
+    if (items.length === 0) {
+      card.focus({ preventScroll: true });
+      e.preventDefault();
+      return;
+    }
+    const first = items[0];
+    const last = items[items.length - 1];
+    const active = document.activeElement;
+    if (e.shiftKey && (active === first || active === card)) {
+      last.focus();
+      e.preventDefault();
+    } else if (!e.shiftKey && active === last) {
+      first.focus();
+      e.preventDefault();
+    }
   }
 
   private stopUpdates(): void {

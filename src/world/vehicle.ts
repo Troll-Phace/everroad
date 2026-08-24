@@ -1,20 +1,25 @@
 import * as THREE from 'three';
 import { AUTOPILOT_CRUISE_FRACTION, type EventBus } from '../types';
 import type { Input } from '../engine/input';
-import { RoadPath, ROAD_HALF_WIDTH } from './roadPath';
+import { RoadPath, ROAD_HALF_WIDTH, LANE_OFFSET } from './roadPath';
 import { buildCar, animateCar, disposeCar, hoverBob, type CarRig } from './car';
 import type { CarStyle } from '../types';
 
 const MPH_TO_MPS = 0.44704;
 /** How far onto the shoulder the car may wander. */
 const MAX_LATERAL = 6.6;
+/**
+ * Path distance a fresh journey starts at. Far enough in that the car sits on
+ * generated road rather than the path's seed sample.
+ */
+export const START_S = 5;
 
 /**
  * The player's car: autopilot cruiser + manual steering + drift-lite.
  * Lives at (s, lateral) on the RoadPath.
  */
 export class Vehicle {
-  s = 5;
+  s = START_S;
   lateral = 0;
   speedMps = 0;
   isDrifting = false;
@@ -61,6 +66,31 @@ export class Vehicle {
     disposeCar(this.rig);
     this.rig = buildCar(style);
     this.root.add(this.rig.group);
+  }
+
+  /**
+   * Hard-place the car at path distance `s`, cruising in the right-hand lane
+   * with drift state cleared. Used when the world teleports along the road —
+   * seeding attract mode into a chosen biome, and starting a journey from the
+   * menu (docs/ARCHITECTURE.md §4.1).
+   *
+   * The car is seeded at autopilot cruise speed rather than at rest so the
+   * scene is alive on the very first rendered frame instead of ramping up.
+   * Callers must also re-seed anything holding absolute `s` values or world
+   * positions (RoadPath, ChunkManager, Pickups) — see main.ts.
+   */
+  resetTo(s: number): void {
+    this.s = s;
+    this.lateral = LANE_OFFSET;
+    this.latVel = 0;
+    this.isDrifting = false;
+    this.driftMiles = 0;
+    this.driftPeakCombo = 1;
+    this.driftYaw = 0;
+    this.speedMps = this.getCruiseMph() * MPH_TO_MPS * AUTOPILOT_CRUISE_FRACTION;
+    this.path.ensure(this.s + 80);
+    // dt = 0: places the mesh from the new pose without advancing anything.
+    this.update(0);
   }
 
   shiftOrigin(dx: number, dz: number): void {

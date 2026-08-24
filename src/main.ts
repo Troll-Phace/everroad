@@ -1,22 +1,23 @@
 import * as THREE from 'three';
 import './style.css';
 import { createEventBus } from './events';
-import { defaultState, defaultRuntime } from './state';
-import type { EconomyContext, GameState, UIActions, UIDeps } from './types';
-import { BIOME_NAMES } from './types';
+import { defaultState, defaultRuntime, newJourneyState } from './state';
+import type { BiomeId, EconomyContext, GameState, SaveSummary, UIActions, UIDeps } from './types';
+import { BIOME_NAMES, BIOME_ORDER } from './types';
 import { Input } from './engine/input';
 import { DayNight } from './engine/daynight';
 import { RoadPath } from './world/roadPath';
-import { ChunkManager } from './world/chunks';
+import { BEHIND, CHUNK_LEN, ChunkManager } from './world/chunks';
 import { Sky } from './world/sky';
 import { FarLand } from './world/farLand';
-import { Vehicle } from './world/vehicle';
+import { START_S, Vehicle } from './world/vehicle';
 import { ChaseCamera } from './world/camera';
+import { MenuCamera } from './world/menuCamera';
 import { Weather } from './world/weather';
 import { Pickups } from './world/pickups';
 import { PostFX } from './world/postfx';
 import { SunShadow } from './world/sunShadow';
-import { BIOMES, biomeAt, blendColor, blendNumber } from './world/biomes';
+import { BIOMES, biomeAt, blendColor, blendNumber, sForBiome } from './world/biomes';
 import * as economy from './game/economy/economy';
 import { CARS, getCarDef } from './game/economy/cars';
 import { UPGRADES, GLOBAL_UPGRADES } from './game/economy/upgrades';
@@ -33,27 +34,16 @@ import { initUI } from './ui/ui';
 
 const bus = createEventBus();
 const state: GameState = save.loadGame() ?? defaultState();
-// defaultStats seeds sessionCount 0, so a fresh install lands on exactly 1
-// here (a returning save lands on 2+ and earns "Welcome Back").
-state.stats.sessionCount += 1;
 economy.initEconomy(state);
 const runtime = defaultRuntime();
-
-// Offline progress (computed before the world spins up).
-// Dev-only: ?fakeaway=7200 simulates returning after N seconds away.
-const fakeAway = import.meta.env.DEV
-  ? Number(new URLSearchParams(location.search).get('fakeaway') ?? 0)
-  : 0;
-const awaySec = fakeAway > 0 ? fakeAway : save.offlineSeconds(state);
-console.info(`[everroad] away ${Math.round(awaySec)}s`);
-let offlinePending: { seconds: number; coins: number } | null = null;
-if (awaySec > 60) {
-  const coins = economy.getIdleCoinsPerSec(state) * awaySec;
-  state.currencies.coins += coins;
-  state.stats.lifetimeCoins += coins;
-  state.stats.offlineCoinsEarned += coins;
-  offlinePending = { seconds: awaySec, coins };
-}
+// The session bump and the offline grant used to happen here. They now live in
+// startGame(), because the app boots into the main menu and only Continue is a
+// return to a journey. The gap is measured to the instant the menu was entered
+// (`menuEnteredMs`), never to "now": quitToMenu() saves on the way out, so
+// measuring to now would pay the player for the time the title screen sat
+// there — a night on the menu would read as a night of idle earnings — while
+// measuring to the menu-entry instant yields the true away time at boot and
+// zero after a quit.
 
 // ---------------------------------------------------------------------------
 // Renderer & scene
@@ -96,11 +86,23 @@ const farLand = new FarLand(scene);
 const weather = new Weather(scene, bus);
 const audio = createAudioEngine();
 
+/**
+ * Cruise speed for attract mode, in mph, or null while playing.
+ *
+ * The showreel car is drawn from the whole catalog and is not the player's, so
+ * it runs at its own `baseSpeed` with no upgrades applied — otherwise every
+ * car in the reel would crawl at whatever the player's garage is worth, and a
+ * hover supercar doing 42 mph does not read as a supercar. Latched in
+ * `enterMenu` and cleared in `startGame`, so the source of truth never depends
+ * on where `runtime.appMode` is written within those functions.
+ */
+let menuCruiseMph: number | null = null;
+
 const vehicle = new Vehicle(
   path,
   input,
   bus,
-  () => economy.getCarSpeed(state),
+  () => menuCruiseMph ?? economy.getCarSpeed(state),
   () => pickups.combo,
   getCarDef(state.currentCarId).style,
 );
@@ -112,16 +114,22 @@ const pickups = new Pickups(scene, path, chunks, bus, {
   getRelicChancePerMile: () => economy.getRelicChancePerMile(state),
   getComboCap: () => economy.getComboCap(state),
   getComboDuration: () => economy.getComboDuration(state),
+  // Attract mode still runs pickups so coins glint on the road, but nothing
+  // it touches may reach the save: every payout callback is a no-op in the
+  // menu (docs/ARCHITECTURE.md §4.1).
   onCoins: (amount) => {
+    if (runtime.appMode === 'menu') return;
     state.currencies.coins += amount;
     state.stats.lifetimeCoins += amount;
     state.stats.pickupsCollected += 1;
   },
   onRelic: () => {
+    if (runtime.appMode === 'menu') return;
     state.currencies.relics += 1;
     state.stats.relicsFound += 1;
   },
   onNearMiss: () => {
+    if (runtime.appMode === 'menu') return;
     state.stats.nearMisses += 1;
   },
 });
@@ -211,6 +219,22 @@ const actions: UIActions = {
     postfx.setQuality(q);
   },
   getCarSpeed: () => economy.getCarSpeed(state),
+  hasSave: () => save.hasSave(),
+  getSaveSummary(): SaveSummary | null {
+    // Built from the state loaded at boot; hasSave() is what decides whether
+    // there is anything worth summarising in the first place.
+    if (!save.hasSave()) return null;
+    return {
+      journeyMiles: state.stats.journeyMiles,
+      lifetimeMiles: state.stats.lifetimeMiles,
+      coins: state.currencies.coins,
+      carName: getCarDef(state.currentCarId).name,
+      prestigeCount: state.stats.prestigeCount,
+      lastSaveTime: state.lastSaveTime,
+    };
+  },
+  startGame: (kind) => startGame(kind),
+  quitToMenu: () => quitToMenu(),
 };
 
 const uiDeps: UIDeps = {
@@ -243,6 +267,7 @@ bus.on('pickup', ({ kind }) => audio.onPickup(kind));
 bus.on('nearMiss', () => audio.onNearMiss());
 bus.on('achievement', () => audio.onAchievement());
 bus.on('driftEnd', ({ miles }) => {
+  if (runtime.appMode === 'menu') return;
   state.stats.driftCount += 1;
   state.stats.driftMiles += miles;
 });
@@ -261,7 +286,195 @@ function applyAccent(biomeId: keyof typeof BIOMES): void {
   document.documentElement.style.setProperty('--accent', hex);
   document.documentElement.style.setProperty('--accent-soft', `${hex}40`);
 }
-applyAccent(runtime.biomeId);
+
+// ---------------------------------------------------------------------------
+// App mode: main menu (attract footage) <-> playing
+// ---------------------------------------------------------------------------
+
+// The cinematic director borrows the chase rig's camera — PostFX captured that
+// one instance at construction, so a second camera would never be rendered.
+const menuCam = new MenuCamera(chase.camera, path);
+
+/**
+ * Times of day attract mode draws from, weighted toward flattering light.
+ * Spans are in DayNight's 0..1 clock (dawn < 0.11, day < 0.55, sunset < 0.72,
+ * night beyond); night is deliberately the rarest draw at ~14%.
+ */
+const MENU_TIME_WINDOWS: Array<{ from: number; to: number; weight: number }> = [
+  { from: 0.05, to: 0.12, weight: 3 }, // dawn glow
+  { from: 0.14, to: 0.5, weight: 3 }, // open day
+  { from: 0.55, to: 0.69, weight: 3.5 }, // golden hour into sunset
+  { from: 0.74, to: 0.95, weight: 1.5 }, // night, rarer
+];
+
+function randomMenuTimeOfDay(): number {
+  let total = 0;
+  for (const w of MENU_TIME_WINDOWS) total += w.weight;
+  let roll = Math.random() * total;
+  for (const w of MENU_TIME_WINDOWS) {
+    roll -= w.weight;
+    if (roll <= 0) return w.from + Math.random() * (w.to - w.from);
+  }
+  return 0.38;
+}
+
+/**
+ * Road kept behind the car when the path is re-seeded. ChunkManager retains
+ * BEHIND chunks behind the car and builds each one from `path.pose`, which
+ * clamps to the stored sample window — re-seeding exactly at the car would
+ * collapse those chunks onto the first sample. Two chunks of slack.
+ */
+const RESEED_MARGIN = (BEHIND + 2) * CHUNK_LEN;
+
+/**
+ * Re-seed every world system for a teleport along the road. The path is
+ * re-anchored at `s` (see RoadPath.reset for why a backwards jump needs it),
+ * so chunks and pickups — both keyed to absolute positions — are dropped in
+ * the same breath, and the biome-derived visuals are refreshed before the
+ * frame that follows.
+ */
+function seedWorldAt(s: number): void {
+  path.reset(s - RESEED_MARGIN);
+  chunks.reset();
+  vehicle.resetTo(s);
+  pickups.reset(s);
+  chunks.update(vehicle.s);
+
+  const biome = biomeAt(vehicle.s);
+  runtime.biomeId = biome.id;
+  runtime.nextBiomeId = biome.next;
+  runtime.biomeBlend = biome.blend;
+  weather.retintLeaves(biome.id);
+  applyAccent(biome.id);
+
+  runtime.speedMph = vehicle.speedMph;
+  runtime.isActive = false;
+  runtime.isDrifting = false;
+  runtime.combo = 1;
+  runtime.comboTimer = 0;
+  runtime.coinRate = 0;
+}
+
+/**
+ * Wall-clock instant the app last entered the main menu. The offline grant
+ * measures to this rather than to `Date.now()`, so time spent on the title
+ * screen is never credited — see `grantOfflineProgress`.
+ */
+let menuEnteredMs = 0;
+
+/**
+ * Enter (or re-enter) the main menu: a randomly-drawn car in a randomly-drawn
+ * biome under randomly-drawn light, shot by the cinematic director. Nothing is
+ * earned and nothing is saved while this runs — see the frame loop's
+ * `menuMode` guards.
+ *
+ * Called once before the first rendered frame so the loading screen lifts onto
+ * the already-correct biome rather than flashing the meadow.
+ */
+function enterMenu(): void {
+  runtime.appMode = 'menu';
+  runtime.paused = true;
+  input.setEnabled(false);
+  // Latched so the offline grant on Continue measures the player's real time
+  // away rather than the time they left the title screen running.
+  menuEnteredMs = Date.now();
+
+  // A showreel, not the player's garage: any car in the catalog may appear,
+  // driving at its own catalog speed (see menuCruiseMph).
+  const showcase = CARS[Math.floor(Math.random() * CARS.length)];
+  menuCruiseMph = showcase.baseSpeed;
+  vehicle.setStyle(showcase.style);
+
+  const biomeId: BiomeId = BIOME_ORDER[Math.floor(Math.random() * BIOME_ORDER.length)];
+  seedWorldAt(sForBiome(biomeId, 0.25 + Math.random() * 0.4));
+
+  daynight.setTimeOfDay(randomMenuTimeOfDay());
+  const snap = daynight.update(0);
+  runtime.timeOfDay = daynight.timeOfDay;
+  runtime.timePhase = snap.phase;
+
+  menuCam.reset();
+  menuCam.update(vehicle, 0);
+
+  bus.emit('appModeChange', { mode: 'menu' });
+}
+
+/**
+ * Grant offline progress for the gap the player was actually away. Only ever
+ * runs on Continue: a new journey has nothing to be away from.
+ *
+ * The window measured is `lastSaveTime -> menuEnteredMs`, not
+ * `lastSaveTime -> now`. Both ends matter:
+ * - Menu time must not be *credited*. `quitToMenu` saves on the way out, so a
+ *   session left sitting on the title screen would otherwise bank a full
+ *   night of idle coins the player never earned. Measuring to the menu-entry
+ *   instant makes a quit-and-continue worth exactly 0 (offlineSeconds clamps
+ *   negatives), while a fresh boot still yields the true time away.
+ * - Menu time must not be *eaten* either, which is why nothing writes a save
+ *   while the menu is up (see the autosave and unload guards).
+ *
+ * Dev-only: `?fakeaway=7200` simulates returning after N seconds away.
+ */
+function grantOfflineProgress(): void {
+  const fakeAway = import.meta.env.DEV
+    ? Number(new URLSearchParams(location.search).get('fakeaway') ?? 0)
+    : 0;
+  const awaySec = fakeAway > 0 ? fakeAway : save.offlineSeconds(state, menuEnteredMs);
+  console.info(`[everroad] away ${Math.round(awaySec)}s`);
+  if (awaySec <= 60) return;
+  const coins = economy.getIdleCoinsPerSec(state) * awaySec;
+  state.currencies.coins += coins;
+  state.stats.lifetimeCoins += coins;
+  state.stats.offlineCoinsEarned += coins;
+  // Delayed so the welcome-back modal lands after the UI's fade back in; the
+  // UI owns all transition timing, this is only the notification.
+  setTimeout(() => bus.emit('offlineSummary', { seconds: awaySec, coins }), 900);
+}
+
+/**
+ * Leave the menu and start playing. Synchronous and instantaneous by contract:
+ * the UI fades to black, calls this, and fades back in, so nothing here may
+ * schedule world changes on a timer.
+ */
+function startGame(kind: 'continue' | 'new'): void {
+  // The player's car again, at the player's speed: drop the showreel override
+  // before anything re-seeds the vehicle.
+  menuCruiseMph = null;
+
+  if (kind === 'new') {
+    save.clearSave();
+    // Settings ride across: "New Journey" erases the journey, not the player's
+    // audio and graphics preferences (that is what "Erase EVERYTHING" is for).
+    // Routed through replaceState so the preserved quality and audio values
+    // reach the systems that otherwise only read them at boot.
+    replaceState(newJourneyState(state.settings));
+    // defaultStats seeds sessionCount 0; a brand-new journey is session 1.
+    state.stats.sessionCount = 1;
+  } else {
+    // A returning save lands on 2+ here and earns "Welcome Back".
+    state.stats.sessionCount += 1;
+    grantOfflineProgress();
+  }
+
+  vehicle.setStyle(getCarDef(state.currentCarId).style);
+  seedWorldAt(START_S);
+  // Cut, don't swoop: without this the chase rig would lerp in from wherever
+  // the cinematic camera happened to be parked.
+  chase.snapTo(vehicle);
+
+  achTimer = 0;
+  saveTimer = 0;
+  input.setEnabled(true);
+  runtime.appMode = 'playing';
+  runtime.paused = false;
+  bus.emit('appModeChange', { mode: 'playing' });
+}
+
+/** Save, then drop back to a freshly-randomised attract scene. */
+function quitToMenu(): void {
+  save.saveGame(state);
+  enterMenu();
+}
 
 // ---------------------------------------------------------------------------
 // Main loop
@@ -284,16 +497,21 @@ function frame(now: number): void {
   requestAnimationFrame(frame);
   let dt = (now - lastNow) / 1000;
   lastNow = now;
+  // Attract mode behind the main menu: the world runs in full, but nothing is
+  // earned, no stat moves and nothing is written to storage.
+  const menuMode = runtime.appMode === 'menu';
 
   // Hidden/throttled tab: sim can't keep up, so bank the surplus time as
   // idle earnings instead of playing in slow motion.
   if (dt > 0.5) {
-    const gapSec = dt - 1 / 60;
-    const gapCoins = economy.getIdleCoinsPerSec(state) * gapSec;
-    state.currencies.coins += gapCoins;
-    state.stats.lifetimeCoins += gapCoins;
-    state.stats.offlineCoinsEarned += gapCoins;
-    if (dt > 60) bus.emit('offlineSummary', { seconds: dt, coins: gapCoins });
+    if (!menuMode) {
+      const gapSec = dt - 1 / 60;
+      const gapCoins = economy.getIdleCoinsPerSec(state) * gapSec;
+      state.currencies.coins += gapCoins;
+      state.stats.lifetimeCoins += gapCoins;
+      state.stats.offlineCoinsEarned += gapCoins;
+      if (dt > 60) bus.emit('offlineSummary', { seconds: dt, coins: gapCoins });
+    }
     dt = 1 / 60;
   }
   dt = Math.min(dt, 0.1);
@@ -318,6 +536,9 @@ function frame(now: number): void {
       vehicle.shiftOrigin(dx, dz);
       chunks.shiftOrigin(dx, dz);
       chase.shiftOrigin(dx, dz);
+      // Cinematic shots are composed in road coordinates, so only the menu
+      // camera's damped look target travels with the rebase.
+      menuCam.shiftOrigin(dx, dz);
       weather.shiftOrigin(dx, dz);
       pickups.shiftOrigin(dx, dz);
     }
@@ -335,13 +556,15 @@ function frame(now: number): void {
   pickups.update(dt, vehicle, milesDelta);
 
   runtime.speedMph = vehicle.speedMph;
-  updateSlowDrive(dt, runtime.speedMph, runtime.paused);
   runtime.isActive = vehicle.isActive;
   runtime.isDrifting = vehicle.isDrifting;
   runtime.combo = pickups.combo;
   runtime.comboTimer = pickups.comboTimer;
-  state.stats.topSpeed = Math.max(state.stats.topSpeed, runtime.speedMph);
-  state.stats.bestCombo = Math.max(state.stats.bestCombo, runtime.combo);
+  if (!menuMode) {
+    updateSlowDrive(dt, runtime.speedMph, runtime.paused);
+    state.stats.topSpeed = Math.max(state.stats.topSpeed, runtime.speedMph);
+    state.stats.bestCombo = Math.max(state.stats.bestCombo, runtime.combo);
+  }
 
   // Biome bookkeeping
   const biome = biomeAt(vehicle.s);
@@ -354,6 +577,15 @@ function frame(now: number): void {
     bus.emit('biomeChange', { id: biome.id, name: BIOME_NAMES[biome.id] });
   }
 
+  // ---- camera ----
+  // Both rigs drive the same PerspectiveCamera; only one of them per frame.
+  // Placed ahead of weather because weather anchors its volume on
+  // camera.position: on a rebase frame chase.shiftOrigin writes the chase
+  // rig's own (stale, and in menu mode never-updated) pose into the camera, so
+  // weather would re-anchor kilometres away for one frame and snap back.
+  if (menuMode) menuCam.update(vehicle, dt);
+  else chase.update(vehicle, dt);
+
   weather.update(
     dt,
     chase.camera.position,
@@ -364,34 +596,38 @@ function frame(now: number): void {
   );
   if (weather.current !== runtime.weatherId) runtime.weatherId = weather.current;
 
-  // ---- economy tick ----
-  const ctx: EconomyContext = {
-    dtSec: dt,
-    milesDelta,
-    isActive: runtime.isActive,
-    combo: runtime.isActive ? runtime.combo : 1,
-    biomeId: runtime.biomeId,
-    timePhase: runtime.timePhase,
-    weatherId: runtime.weatherId,
-  };
-  const tick = economy.applyTick(state, ctx);
-  runtime.coinRate = THREE.MathUtils.lerp(
-    runtime.coinRate,
-    tick.coinsEarned / Math.max(dt, 1e-4),
-    0.08,
-  );
+  // ---- economy tick + achievements ----
+  // Both are skipped wholesale in the menu: applyTick is the only writer of
+  // state.currencies during play, so not calling it is what makes attract
+  // mode provably free of earnings.
+  if (!menuMode) {
+    const ctx: EconomyContext = {
+      dtSec: dt,
+      milesDelta,
+      isActive: runtime.isActive,
+      combo: runtime.isActive ? runtime.combo : 1,
+      biomeId: runtime.biomeId,
+      timePhase: runtime.timePhase,
+      weatherId: runtime.weatherId,
+    };
+    const tick = economy.applyTick(state, ctx);
+    runtime.coinRate = THREE.MathUtils.lerp(
+      runtime.coinRate,
+      tick.coinsEarned / Math.max(dt, 1e-4),
+      0.08,
+    );
 
-  // ---- achievements (batched) ----
-  achTimer += dt;
-  if (achTimer > 1) {
-    achTimer = 0;
-    const newly = checkAchievements(state, runtime);
-    if (newly.length) bus.emit('achievement', { defs: newly });
+    achTimer += dt;
+    if (achTimer > 1) {
+      achTimer = 0;
+      const newly = checkAchievements(state, runtime);
+      if (newly.length) bus.emit('achievement', { defs: newly });
+    }
   }
 
   // ---- visuals ----
+  // The active rig has already placed the camera for this frame, above.
   const camPos = chase.camera.position;
-  chase.update(vehicle, dt);
   sky.update(camPos, snap, vehicle.s, weather.auroraStrength, dt);
   farLand.update(camPos, vehicle.s);
   postfx.setGolden(snap.golden, snap.elevation > -0.05);
@@ -435,10 +671,14 @@ function frame(now: number): void {
   }
 
   // ---- autosave ----
-  saveTimer += dt;
-  if (saveTimer > 5) {
-    saveTimer = 0;
-    save.saveGame(state);
+  // Never in the menu: saveGame stamps lastSaveTime, which would eat the
+  // offline progress the player has not collected yet.
+  if (!menuMode) {
+    saveTimer += dt;
+    if (saveTimer > 5) {
+      saveTimer = 0;
+      save.saveGame(state);
+    }
   }
 
   postfx.render(dt);
@@ -452,12 +692,13 @@ function frame(now: number): void {
       setTimeout(() => loader.classList.add('done'), 250);
       setTimeout(() => loader.remove(), 1800);
     }
-    if (offlinePending) {
-      const pending = offlinePending;
-      setTimeout(() => bus.emit('offlineSummary', pending), 900);
-    }
   }
 }
+
+// Seeded before the first rendered frame, so the loading screen lifts onto the
+// attract scene's own biome rather than flashing the default meadow. initUI has
+// already run, so the UI is subscribed in time for this emit.
+enterMenu();
 
 requestAnimationFrame(frame);
 
@@ -486,11 +727,21 @@ if (import.meta.env.DEV) {
     chunks,
     pickups,
     scene,
+    path,
     camera: chase.camera,
+    chase,
+    menuCam,
+    enterMenu,
+    startGame,
+    quitToMenu,
   };
 }
 
-window.addEventListener('beforeunload', () => save.saveGame(state));
+// Same reason as the autosave timer: a save written from the menu would stamp
+// lastSaveTime and swallow the player's uncollected offline progress.
+window.addEventListener('beforeunload', () => {
+  if (runtime.appMode === 'playing') save.saveGame(state);
+});
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden) save.saveGame(state);
+  if (document.hidden && runtime.appMode === 'playing') save.saveGame(state);
 });

@@ -22,6 +22,7 @@ that one of these covers.
 | Token | Value | Role |
 |-------|-------|------|
 | `--glass-bg` | `rgba(20, 24, 38, 0.42)` | The surface every panel and HUD group sits on |
+| `--glass-bg-strong` | `rgba(14, 16, 30, 0.62)` | Heavier glass for full-bleed surfaces carrying text straight over the world (main-menu buttons) |
 | `--glass-border` | `rgba(255, 255, 255, 0.14)` | Hairline edge that separates glass from world |
 | `--glass-blur` | `14px` | Backdrop blur; what makes text readable over detail |
 | `--text-main` | `rgba(255, 255, 255, 0.94)` | Primary text |
@@ -29,6 +30,9 @@ that one of these covers.
 | `--accent` | `#ffb26b` (default) | **Retinted per biome at runtime** |
 | `--accent-soft` | `rgba(255, 178, 107, 0.25)` | Accent fills, active states, glows |
 | `--radius` | `14px` | Panel and HUD corner radius |
+| `--scrim-rgb` | `6, 6, 16` | Scrim base as raw channels, so gradients vary alpha per stop |
+| `--menu-ink` | `#fff7ec` | Title-screen warm white (the loading title's color, reused by the menu wordmark) |
+| `--menu-ink-dim` | `rgba(255, 247, 236, 0.78)` | Secondary title-screen type — the tagline, the menu button sub-lines and the footer |
 
 Page background is `#1a1626` — visible only before the canvas paints, and used
 as the foreground color when a button fills with the accent.
@@ -54,7 +58,25 @@ not the accent.
 | Hover surface | `rgba(255, 255, 255, 0.16)` | `.btn:hover` |
 | Scrollbar thumb | `rgba(255, 255, 255, 0.25)` | Panel content |
 
-### 1.4 Loading screen
+### 1.4 Scrims over live footage
+
+The main menu is the one surface with **no panel around it**: brand type and
+button slabs sit directly on attract-mode footage that runs from near-black
+night to a blazing sunset. Legibility is built in three layers, and all three
+are load-bearing — none of them alone survives the bright case:
+
+1. **A directional scrim.** On desktop a `100deg` gradient from
+   `rgba(var(--scrim-rgb), 0.88)` at the left edge down to `0.06` at 76%, plus
+   a bottom band. It darkens only the column the text occupies and leaves the
+   middle of the frame open, so the footage still reads as the point of the
+   screen. On small screens it flips to a vertical gradient under a bottom
+   sheet.
+2. **Glass under every button** (`--glass-bg-strong`), so button text never
+   depends on the scrim alone.
+3. **Text shadow** on the free-standing wordmark, tagline and footer, which
+   have no surface of their own.
+
+### 1.5 Loading screen
 
 The one place with a fixed palette, because no world exists yet: a vertical
 gradient `#2b1e4e → #7a3b6e (45%) → #e8735a (80%) → #ffb26b`, title in
@@ -73,22 +95,27 @@ they tick.
 
 | Role | Size | Weight | Notes |
 |------|------|--------|-------|
+| Menu wordmark | `clamp(2.4rem, 6vw, 4.2rem)` | 700 | `letter-spacing: 0.3em`, `--menu-ink` |
 | Speedometer | 2.4rem | 600 | `line-height: 1`, mono |
 | Combo multiplier | 1.3rem | 600 | Accent colored |
 | Journey odometer | 1.15rem | 600 | Mono |
 | Panel title | 1.15rem | 700 | `letter-spacing: 0.05em` |
 | Currency value | 0.95rem | 600 | Mono |
 | Biome name | 0.9rem | 600 | `letter-spacing: 0.04em` |
+| Menu button label | 1.05rem | 700 | `letter-spacing: 0.06em` |
 | Big button | 0.95rem | — | `.btn-big` |
 | Button | 0.85rem | — | |
 | Section label | 0.75rem | — | Uppercase, dim |
 | Chip | 0.75rem | — | |
 | Unit / lifetime / fps | 0.7rem | — | `--text-dim` |
+| Menu button sub-line | 0.75rem | 500 | `--menu-ink-dim` |
+| Menu button meta / footer | 0.7rem | — | `--menu-ink-dim`; meta is mono |
 | Key hint | 0.68rem | — | Mono |
 | Mode / drift pill | 0.6rem | — | Uppercase |
 
 Sizes are in `rem` so browser zoom and OS text scaling work. The loading title
-is the one fluid value: `clamp(3rem, 9vw, 6rem)`.
+and the menu wordmark are the two fluid values: `clamp(3rem, 9vw, 6rem)` and
+`clamp(2.4rem, 6vw, 4.2rem)`.
 
 ## 3. Spacing, radius, and layout
 
@@ -105,6 +132,8 @@ the HUD corners and opening up inside panels.
 | Card grid | — | `0.8rem` |
 | Button | `0.5em 1em` | — |
 | Big button | `0.85em 1em` | — |
+| Menu button | `0.95rem 1.15rem 0.95rem 1.4rem` | `0.7rem` between slabs |
+| Menu column | `2rem 1.5rem 2rem clamp(1.5rem, 6vw, 5rem)` | `clamp(1.5rem, 4vh, 2.6rem)` |
 | Chip | `0.3em 0.9em` | — |
 | Key hint | `0.15em 0.5em` | — |
 
@@ -114,6 +143,7 @@ HUD groups are inset `1rem` from their corner.
 |--------|----------|
 | `var(--radius)` (14px) | Panels, HUD groups |
 | `10px` | Buttons |
+| `12px` | Menu button slabs |
 | `8px` | Selects |
 | `6px` | Key hints, scrollbar thumb |
 | `3px` | Progress tracks |
@@ -184,7 +214,21 @@ progress, prestige mile progress, and upgrade caps. The combo meter uses its own
 set `pointer-events: auto` explicitly — they live inside a layer that has them
 turned off.
 
-### 4.8 Cards
+### 4.8 `.menu-btn`
+
+The main menu's action slab: full-width, `.btn` + `.panel-glass` composed with
+`--glass-bg-strong` and a 12px radius, holding a bold label plus one or two
+quiet sub-lines (the save summary, the "last driven …" line, a one-line
+description). A 3px `.menu-btn-rail` on the leading edge takes the accent and
+appears on hover, focus, and on `.is-primary`; hover adds an accent-tinted wash
+and nudges the slab 4px right. Focus draws an accent outline backed by a dark
+ring so it survives a sky the same color as the accent.
+
+Disabled slabs deliberately do **not** take the standard `opacity: 0.4` — that
+would fade out the reason the control is unavailable. They keep full opacity
+with muted text and state the reason in the sub-line ("No journey yet").
+
+### 4.9 Cards
 
 `.car-card` and the trophy cards share a grid (`gap: 0.8rem`) and a common
 anatomy: identity at the top, stats in the middle, action at the bottom. Locked
@@ -204,10 +248,21 @@ description; unlocked takes an accent glow and a reward line.
 | `biome-banner` | ~2.6s | fade in, hold, fade out |
 | `prestige-flash` | one-shot radial | |
 | Loading screen fade | 1.2s | `ease` |
+| `menu-rise` / `menu-fade` (menu entrance) | 0.9s / 1.1s | `ease`, staggered 0.35→0.95s so it lands as the loader lifts |
+| Mode fade out (before a `startGame`/`quitToMenu` swap) | 0.32s | `ease` |
+| Mode fade in (after the swap) | 0.5s | `ease` |
 
 Motion is confirmation, not decoration: something moves because state changed.
 The combo meter pulses when the multiplier actually rises; the drift pill glows
 only while drifting.
+
+The **mode fade** (`.mode-cover`, `src/ui/transition.ts`) is the exception to
+"motion is confirmation": `startGame()` and `quitToMenu()` are synchronous and
+instantaneous, so the cover is the entire visible transition and it also hides
+the world being torn down and rebuilt. Under reduced motion it is *shortened*
+(90ms / 120ms), never removed — dropping it would expose a hard visual snap
+rather than remove motion. While it runs it takes pointer events, which is also
+what makes a menu button impossible to double-fire.
 
 **Reduced motion.** `@media (prefers-reduced-motion: reduce)` drops keyframe
 entrances and the drift glow to a plain opacity change and shortens transitions
@@ -221,12 +276,26 @@ the pulse.
   which clears WCAG AA (4.5:1) against the darkest and the brightest skies the
   world produces. Check new text against a pale dawn, not only against night —
   that is the failing case. `--text-dim` at 0.6 alpha is for supporting text
-  only; it does not carry information that appears nowhere else.
+  only; it does not carry information that appears nowhere else. The main menu
+  is the worked example: its button sub-lines and footer *look* like supporting
+  text but are the only statement of the save summary, the reason a disabled
+  Continue is disabled, and the menu's key bindings — the HUD that would
+  otherwise repeat any of it is `display: none` there — so they take
+  `--menu-ink-dim` (0.78) rather than `--text-dim`.
 - **Keyboard.** Every panel opens and closes by key, Esc closes the open panel
   or opens settings when none is open, and pressing an open panel's own key
-  closes it. Focus indicators are visible on every interactive element.
-- **Focus trapping.** While a text field has focus (the save import box), panel
-  hotkeys are ignored, as they are while Ctrl/Cmd/Alt are held.
+  closes it. Focus indicators are visible on every interactive element. A
+  control that has been visually receded behind a modal surface must also be
+  made unreachable — a faded focus outline is an invisible focus indicator, and
+  the outline is the only one there is. `inert` is the mechanism; a
+  `pointer-events: none` ancestor is not, because `.btn` sets
+  `pointer-events: auto` and re-establishes itself as a hit target underneath
+  one.
+- **Focus trapping.** Opening a panel or the offline-summary modal moves focus
+  into it and Tab wraps inside; closing returns focus where it came from. Both
+  carry `role="dialog"`, `aria-modal="true"` and an `aria-labelledby` pointing
+  at their own heading. While a text field has focus (the save import box),
+  panel hotkeys are ignored, as they are while Ctrl/Cmd/Alt are held.
 - **Pointer surface.** `#ui-root` is `pointer-events: none`; only interactive
   elements opt back in. The world stays clickable everywhere the UI is not.
 - **Motion sensitivity.** See §5.
@@ -247,12 +316,19 @@ the pulse.
   --accent: #ffb26b;      /* biome-tinted at runtime */
   --accent-soft: rgba(255, 178, 107, 0.25);
   --radius: 14px;
+  --glass-bg-strong: rgba(14, 16, 30, 0.62);
+  --scrim-rgb: 6, 6, 16;
+  --menu-ink: #fff7ec;
+  --menu-ink-dim: rgba(255, 247, 236, 0.78);
 }
 ```
 
 ## 8. Responsive
 
 One breakpoint, `@media (max-width: 640px)`, which tightens HUD padding and
-reduces the corner groups so the road stays visible. Everroad renders on small
+reduces the corner groups so the road stays visible. The main menu restructures
+at the same breakpoint: the left-anchored column becomes a full-width bottom
+sheet with a vertical scrim, and the wordmark's letter-spacing tightens so
+EVERROAD still fits one line at phone width. Everroad renders on small
 screens; it is not driven on them — touch controls are out of scope, so the
 mobile treatment optimizes for watching, not playing.

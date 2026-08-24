@@ -6,9 +6,10 @@
  * runtime are read live every frame.
  */
 import './ui.css';
-import type { UIDeps } from '../types';
+import type { AppMode, UIDeps } from '../types';
 import { initEffects } from './effects';
 import { initHUD } from './hud';
+import { initMainMenu } from './mainMenu';
 import { PanelManager } from './panels';
 import { garagePanel } from './panelGarage';
 import { helpPanel } from './panelHelp';
@@ -16,6 +17,7 @@ import { prestigePanel } from './panelPrestige';
 import { settingsPanel } from './panelSettings';
 import { trophiesPanel } from './panelTrophies';
 import { upgradesPanel } from './panelUpgrades';
+import { createModeTransition } from './transition';
 
 export function initUI(deps: UIDeps): void {
   const root = document.getElementById('ui-root');
@@ -24,16 +26,27 @@ export function initUI(deps: UIDeps): void {
     return;
   }
 
+  const transition = createModeTransition();
+
   const effects = initEffects(deps, root);
   initHUD(deps, root);
 
+  // Built before the menu, so `openSettings` below closes over a `panels` that
+  // already exists rather than one still in its temporal dead zone. Mount order
+  // no longer decides what paints on top: `.panel-layer` carries an explicit
+  // z-index, so Settings opens over the menu however the two are appended.
   const panels = new PanelManager(deps, root);
   panels.register(garagePanel(deps));
   panels.register(upgradesPanel(deps));
   panels.register(trophiesPanel(deps));
   panels.register(prestigePanel(deps, panels));
-  panels.register(settingsPanel(deps, panels, effects));
+  panels.register(settingsPanel(deps, panels, effects, transition));
   panels.register(helpPanel());
+
+  const menu = initMainMenu(deps, root, {
+    transition,
+    openSettings: () => panels.open('settings'),
+  });
 
   // ---- keyboard -----------------------------------------------------------
   const keyToPanel: Record<string, string> = {
@@ -59,13 +72,24 @@ export function initUI(deps: UIDeps): void {
 
     const key = e.key.toLowerCase();
     if (key in keyToPanel) {
+      // The panel hotkeys are gameplay furniture; on the menu they open panels
+      // over a title screen that has no game to talk about.
+      if (deps.runtime.appMode !== 'playing' || transition.busy) return;
       panels.toggle(keyToPanel[key]);
       e.preventDefault();
     } else if (key === 'escape') {
+      // Unlike the panel hotkeys, Esc stays live on the menu — the footer
+      // advertises it as the way into Settings. It does not stay live *during*
+      // a mode fade: the player is already committed to a screen change, and
+      // opening Settings here landed them in gameplay with the card still up.
+      if (transition.busy) return;
       if (panels.current !== null) panels.close();
       else panels.open('settings');
       e.preventDefault();
     } else if (key === 'm') {
+      // Also live on the menu, where the footer advertises it. Its toast is
+      // player-initiated feedback, so it shows in either mode — the toast stack
+      // is only hidden from *game* events, which are gated in effects.ts.
       const next = !deps.state.settings.audioEnabled;
       deps.actions.setAudioEnabled(next);
       effects.toast({ icon: next ? '🔊' : '🔇', body: next ? 'Audio on' : 'Audio muted' });
@@ -73,8 +97,39 @@ export function initUI(deps: UIDeps): void {
     }
   });
 
-  // First-run welcome: brand-new saves get the help panel once.
-  if (deps.state.stats.playTimeSec < 5) {
-    panels.open('help');
+  // ---- app mode -----------------------------------------------------------
+  // The menu shows over live attract footage. The HUD and the banner are
+  // gameplay furniture, hidden in CSS off body[data-appmode]; game-event toasts
+  // are gated at their source in effects.ts instead, so the stack itself stays
+  // available for the menu's own feedback.
+  let firstRunHelpShown = false;
+
+  function applyMode(mode: AppMode): void {
+    document.body.dataset.appmode = mode;
+    menu.setMode(mode);
+    // A panel belongs to the screen it was opened on, in both directions.
+    // Quit-to-menu closes Settings itself, but any other panel left open must
+    // not survive the change — and going the other way, Esc on the menu then
+    // Enter on a button behind the card dropped the player into gameplay with
+    // the settings panel still sitting over the road.
+    panels.close();
+    if (mode === 'menu') {
+      // Toasts, the biome banner and the offline-summary overlay are gameplay
+      // furniture too. The overlay in particular has no dismissal beyond its
+      // own button, so quitting with it up parked it over the title screen.
+      effects.clearTransient();
+      return;
+    }
+    // First-run welcome: a brand-new save gets the help panel once, on its
+    // first transition into play rather than on top of the main menu.
+    if (!firstRunHelpShown && deps.state.stats.playTimeSec < 5) {
+      firstRunHelpShown = true;
+      panels.open('help');
+    }
   }
+
+  deps.bus.on('appModeChange', (p) => applyMode(p.mode));
+  // Read the live value too, so the initial menu shows even if the engine's
+  // first emit landed before this subscription.
+  applyMode(deps.runtime.appMode);
 }

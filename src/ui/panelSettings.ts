@@ -1,19 +1,26 @@
 /**
- * Settings panel: audio, quality, fps counter, save export/import/reset.
+ * Settings panel: audio, quality, fps counter, quit to menu, and save
+ * export/import/reset. Reachable from gameplay and from the main menu; rows
+ * that only make sense in one of the two are gated on `runtime.appMode`.
  *
  * Note on volumes: UIActions only exposes setAudioEnabled/setQuality, so the
  * music/sfx sliders mutate state.settings.musicVolume/sfxVolume directly —
  * the audio engine reads those live each update.
  */
 import type { GameSettings, UIDeps } from '../types';
+import { armConfirm } from './confirm';
 import { el } from './dom';
 import type { Effects } from './effects';
 import type { PanelDef, PanelManager } from './panels';
+import type { ModeTransition } from './transition';
 
-const CONFIRM_WINDOW_MS = 3000;
-
-export function settingsPanel(deps: UIDeps, manager: PanelManager, effects: Effects): PanelDef {
-  const { state, actions } = deps;
+export function settingsPanel(
+  deps: UIDeps,
+  manager: PanelManager,
+  effects: Effects,
+  transition: ModeTransition,
+): PanelDef {
+  const { state, runtime, actions } = deps;
 
   function row(label: string, control: HTMLElement): HTMLElement {
     const r = el('div', 'settings-row');
@@ -83,6 +90,26 @@ export function settingsPanel(deps: UIDeps, manager: PanelManager, effects: Effe
       });
       content.append(row('Show FPS', fpsToggle));
 
+      // ---- quit to menu ---------------------------------------------------
+      // Only meaningful in gameplay: the menu is already where this leads.
+      if (runtime.appMode === 'playing') {
+        content.append(el('div', 'panel-divider'));
+        content.append(el('div', 'section-label', 'Session'));
+
+        const quitBtn = el('button', 'btn btn-big', 'Quit to Main Menu');
+        // A browser tab cannot close itself, so "quit" means exactly this:
+        // save, then hand the world back to the attract-mode menu.
+        const quitNote = el('div', 'settings-note', 'Saves your journey first.');
+        quitBtn.addEventListener('click', () => {
+          if (transition.busy) return;
+          transition.run(() => {
+            manager.close();
+            actions.quitToMenu();
+          });
+        });
+        content.append(quitBtn, quitNote);
+      }
+
       // ---- save -----------------------------------------------------------
       content.append(el('div', 'panel-divider'));
       content.append(el('div', 'section-label', 'Save'));
@@ -136,24 +163,14 @@ export function settingsPanel(deps: UIDeps, manager: PanelManager, effects: Effe
       // ---- danger zone ----------------------------------------------------
       content.append(el('div', 'panel-divider'));
       const resetBtn = el('button', 'btn btn-ghost btn-danger-ghost', 'Reset save');
-      let armed = false;
-      let armTimer = 0;
-      resetBtn.addEventListener('click', () => {
-        if (!armed) {
-          armed = true;
-          resetBtn.textContent = 'Erase EVERYTHING? Click again';
-          resetBtn.classList.add('btn-danger');
-          armTimer = window.setTimeout(() => {
-            armed = false;
-            resetBtn.textContent = 'Reset save';
-            resetBtn.classList.remove('btn-danger');
-          }, CONFIRM_WINDOW_MS);
-          return;
-        }
-        window.clearTimeout(armTimer);
-        actions.resetSave();
-        // Re-render so the controls reflect the freshly reset settings.
-        manager.refresh();
+      armConfirm(resetBtn, {
+        idle: 'Reset save',
+        armed: 'Erase EVERYTHING? Click again',
+        onConfirm: () => {
+          actions.resetSave();
+          // Re-render so the controls reflect the freshly reset settings.
+          manager.refresh();
+        },
       });
       content.append(resetBtn);
     },

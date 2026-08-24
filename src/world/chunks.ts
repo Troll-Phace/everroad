@@ -6,7 +6,12 @@ import { vertexToonMat, rng, noise2, jitterColor } from './materials';
 
 export const CHUNK_LEN = 60;
 const AHEAD = 22; // chunks ahead of the car (~1.3 km)
-const BEHIND = 3;
+/**
+ * Chunks retained behind the car. Exported because a path re-seed has to
+ * keep at least this much road behind the car for them to be built from real
+ * samples rather than a clamped lookup.
+ */
+export const BEHIND = 3;
 
 /** Roadside object the pickups system can near-miss against. */
 export interface Obstacle {
@@ -363,6 +368,19 @@ export class ChunkManager {
       }
     }
     this.path.prune(carS - BEHIND * CHUNK_LEN - 100);
+  }
+
+  /**
+   * Dispose every live chunk. Called when the car teleports along the path and
+   * the road is re-seeded (RoadPath.reset), after which cached chunk geometry
+   * no longer matches the curve it was built from.
+   */
+  reset(): void {
+    for (const chunk of this.chunks.values()) {
+      this.root.remove(chunk.group);
+      for (const g of chunk.geos) g.dispose();
+    }
+    this.chunks.clear();
   }
 
   shiftOrigin(dx: number, dz: number): void {

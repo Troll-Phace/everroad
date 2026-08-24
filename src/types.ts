@@ -214,6 +214,29 @@ export interface GameState {
 }
 
 // ---------------------------------------------------------------------------
+// App shell (main menu vs. play)
+// ---------------------------------------------------------------------------
+
+/**
+ * Which shell the app is in. `menu` runs the world purely as attract-mode
+ * footage behind the main menu: the sim, sky, weather and audio all run, but
+ * nothing is earned, no stat moves and nothing is saved. `playing` is the game.
+ */
+export type AppMode = 'menu' | 'playing';
+
+/** The one-line "here is what you left behind" the Continue button shows. */
+export interface SaveSummary {
+  journeyMiles: number;
+  lifetimeMiles: number;
+  coins: number;
+  /** Display name of the saved car, already resolved from the catalog. */
+  carName: string;
+  prestigeCount: number;
+  /** Epoch ms of the last save, for a "2h ago" line. */
+  lastSaveTime: number;
+}
+
+// ---------------------------------------------------------------------------
 // Runtime state (NOT saved; lives for the session)
 // ---------------------------------------------------------------------------
 
@@ -239,6 +262,8 @@ export interface RuntimeState {
   coinRate: number;
   fps: number;
   paused: boolean;
+  /** Menu (attract footage) vs. play. Set by main.ts, read by the UI. */
+  appMode: AppMode;
 }
 
 // ---------------------------------------------------------------------------
@@ -319,6 +344,7 @@ export interface GameEvents {
   toast: { text: string; icon?: string };
   saveExported: { code: string };
   uiPanelChange: { panel: string | null };
+  appModeChange: { mode: AppMode };
 }
 
 export type EventName = keyof GameEvents;
@@ -348,6 +374,17 @@ export interface UIActions {
   setQuality(q: GameSettings['quality']): void;
   /** Effective cruising speed of the current car with upgrades. */
   getCarSpeed(): number;
+  /** True when localStorage holds a save worth continuing. */
+  hasSave(): boolean;
+  /** Summary of the stored save for the menu's Continue button, or null. */
+  getSaveSummary(): SaveSummary | null;
+  /**
+   * Leave the menu and start playing. `continue` resumes the stored save and
+   * grants offline progress; `new` erases it and starts a fresh journey.
+   */
+  startGame(kind: 'continue' | 'new'): void;
+  /** Save, then return to the main menu with a freshly randomised attract scene. */
+  quitToMenu(): void;
 }
 
 export interface UIDeps {

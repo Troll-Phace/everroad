@@ -251,6 +251,31 @@ export class Pickups {
     this.relicMat.dispose();
   }
 
+  /**
+   * Clear every live coin, the relic, the combo and the near-miss dedupe.
+   * Called when the car teleports along the path (attract-mode re-seed, or
+   * starting a journey from the menu): coins and obstacles are keyed by
+   * absolute `s`, so leaving them alive would strand them behind the car and
+   * carry a menu-earned combo into play.
+   */
+  reset(carS: number): void {
+    for (const coin of this.coins) coin.active = false;
+    this.coinMesh.count = 0;
+    this.coinMesh.instanceMatrix.needsUpdate = true;
+    if (this.relic) {
+      this.scene.remove(this.relic.mesh);
+      this.relic = null;
+    }
+    this.relicMiles = 0;
+    this.consumedObstacles.clear();
+    this.combo = 1;
+    this.comboTimer = 0;
+    // Re-arm the spawn cursor just ahead of the car, the same gap the
+    // constructor seeds at s = 0; leaving it behind would trickle patterns in
+    // one per frame from the old origin.
+    this.furthestSpawn = carS + 120;
+  }
+
   shiftOrigin(dx: number, dz: number): void {
     if (this.relic) {
       this.relic.mesh.position.x += dx;

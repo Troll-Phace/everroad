@@ -52,6 +52,14 @@ export class DayNight {
     this.timeOfDay = startTime;
   }
 
+  /**
+   * Re-seed the clock without rebuilding the cycle. Attract mode draws a fresh
+   * (flattering) hour every time the menu is entered — see main.ts.
+   */
+  setTimeOfDay(t: number): void {
+    this.timeOfDay = ((t % 1) + 1) % 1;
+  }
+
   update(dt: number): SunSnapshot {
     this.timeOfDay = (this.timeOfDay + dt / CYCLE_SEC) % 1;
     // Azimuth precesses a full turn every ~7 cycles so scenery lighting varies.
