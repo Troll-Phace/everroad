@@ -410,7 +410,7 @@ function sha512(buffer) {
   return crypto.createHash('sha512').update(buffer).digest('base64');
 }
 
-/** `EverRoad-0.1.18-mac-arm64 (1).zip` — never silently overwrite a previous download. */
+/** `Everroad-0.1.18-mac-arm64 (1).zip` — never silently overwrite a previous download. */
 function freePath(dir, name) {
   const ext = path.extname(name);
   const stem = path.basename(name, ext);
