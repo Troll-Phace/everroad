@@ -5,7 +5,7 @@
  * truth for patch notes. Edit that file and regenerate; `npm run verify` and
  * CI both fail when the two drift apart.
  *
- * 20 release(s), 50 note(s), newest 0.1.19 (2026-08-24).
+ * 21 release(s), 51 note(s), newest 0.1.20 (2026-08-24).
  */
 
 /** One `### ` block of a release: "Added", "Changed", "Fixed", and friends. */
@@ -24,6 +24,18 @@ export interface ChangelogRelease {
 
 /** Newest first. Excludes the [Unreleased] section. */
 export const CHANGELOG: readonly ChangelogRelease[] = [
+  {
+    version: '0.1.20',
+    date: '2026-08-24',
+    sections: [
+      {
+        heading: 'Fixed',
+        items: [
+          '**The Linux RPM build now offers you the right file to update with.** On Fedora and its relatives, checking for an update fetched the AppImage instead of the RPM — a 128 MB download landing in your Downloads folder that your package manager had no idea what to do with. It now hands back the RPM, the way the Windows and AppImage builds have always handed back theirs.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.19',
     date: '2026-08-24',

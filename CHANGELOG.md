@@ -15,6 +15,8 @@ the generated module.
 
 ## [Unreleased]
 
+## [0.1.20] - 2026-08-24
+
 ### Fixed
 
 - **The Linux RPM build now offers you the right file to update with.** On
@@ -256,4 +258,4 @@ the generated module.
 - A generative audio engine, the HUD and panel overlay, and a save system that
   keeps earning while you are away.
 
-[Unreleased]: https://github.com/Troll-Phace/everroad/compare/v0.1.19...HEAD
+[Unreleased]: https://github.com/Troll-Phace/everroad/compare/v0.1.20...HEAD
