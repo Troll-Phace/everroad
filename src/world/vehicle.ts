@@ -99,9 +99,9 @@ export class Vehicle {
       const steerSpeed = (5.5 + this.speedMps * 0.16) * (this.isDrifting ? 1.55 : 1);
       this.latVel = THREE.MathUtils.damp(this.latVel, steer * steerSpeed, 10, dt);
     } else {
-      // Autopilot: gentle lane wander, mostly hugging the center.
-      const wander = Math.sin(this.s * 0.004 + 1.3) * 1.1 + Math.sin(this.s * 0.0013) * 0.6;
-      const target = THREE.MathUtils.clamp(wander, -2.2, 2.2);
+      // Autopilot: keep to the right lane with a gentle wander.
+      const wander = Math.sin(this.s * 0.004 + 1.3) * 0.7 + Math.sin(this.s * 0.0013) * 0.5;
+      const target = THREE.MathUtils.clamp(2.0 + wander, 0.8, 3.4);
       this.latVel = THREE.MathUtils.damp(this.latVel, (target - this.lateral) * 0.9, 4, dt);
     }
     this.lateral = THREE.MathUtils.clamp(this.lateral + this.latVel * dt, -MAX_LATERAL, MAX_LATERAL);

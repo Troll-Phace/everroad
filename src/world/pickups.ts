@@ -80,7 +80,9 @@ export class Pickups {
     }
 
     // ---- coins: magnet, collect, cull, render ----
-    const magnetR = this.deps.getMagnetRadius();
+    // Magnet only works with hands on the wheel — idle cruising still scoops
+    // direct hits, but weaving is what pays.
+    const magnetR = active ? this.deps.getMagnetRadius() : 0;
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const e = new THREE.Euler();

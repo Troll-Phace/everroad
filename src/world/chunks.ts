@@ -37,9 +37,9 @@ export function terrainHeight(path: RoadPath, s: number, lat: number): number {
 }
 
 // Road cross-section: lateral offsets + which paint each column carries.
-const ROAD_COLS = [-5.5, -4.65, -4.35, -4.05, -0.16, 0.16, 4.05, 4.35, 4.65, 5.5];
+const ROAD_COLS = [-5.5, -4.65, -4.35, -4.05, -0.5, -0.16, 0.16, 0.5, 4.05, 4.35, 4.65, 5.5];
 type Paint = 'dirt' | 'asphalt' | 'edge' | 'dash';
-const ROAD_PAINT: Paint[] = ['dirt', 'asphalt', 'edge', 'asphalt', 'dash', 'dash', 'asphalt', 'edge', 'asphalt', 'dirt'];
+const ROAD_PAINT: Paint[] = ['dirt', 'asphalt', 'edge', 'asphalt', 'asphalt', 'dash', 'dash', 'asphalt', 'asphalt', 'edge', 'asphalt', 'dirt'];
 
 const COL_DIRT = new THREE.Color('#96795a');
 const COL_ASPHALT = new THREE.Color('#4d4d5c');
@@ -250,13 +250,16 @@ export class ChunkManager {
           lat = side * (6.5 + r() * 40);
           break;
         default:
-          lat = side * (8.5 + r() * 130);
+          lat = side * (10.5 + r() * 128);
       }
 
-      const scale =
+      let scale =
         kind === 'windmill' ? 0.9 + r() * 0.4 :
         kind === 'rock' ? 0.6 + r() * 1.1 :
         0.75 + r() * 0.6;
+      // Keep trees hugging the road smaller so canopies never swallow the camera.
+      const isTree = kind === 'oak' || kind === 'maple' || kind === 'pine' || kind === 'poplar' || kind === 'cherryTree';
+      if (isTree && Math.abs(lat) < 17) scale = Math.min(scale, 0.9);
 
       // Rows and fences align with the road; everything else spins freely.
       const heading = this.path.heading(s);

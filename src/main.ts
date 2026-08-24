@@ -76,7 +76,8 @@ sun.shadow.camera.top = 60;
 sun.shadow.camera.bottom = -60;
 sun.shadow.camera.near = 1;
 sun.shadow.camera.far = 500;
-sun.shadow.bias = -0.0015;
+sun.shadow.bias = -0.0002;
+sun.shadow.normalBias = 2.2;
 scene.add(sun);
 scene.add(sun.target);
 
@@ -268,9 +269,11 @@ function frame(now: number): void {
   let dt = (now - lastNow) / 1000;
   lastNow = now;
 
-  // Tab was hidden / long stall: grant idle earnings for the gap, skip sim.
-  if (dt > 2) {
-    const gapCoins = economy.getIdleCoinsPerSec(state) * dt;
+  // Hidden/throttled tab: sim can't keep up, so bank the surplus time as
+  // idle earnings instead of playing in slow motion.
+  if (dt > 0.5) {
+    const gapSec = dt - 1 / 60;
+    const gapCoins = economy.getIdleCoinsPerSec(state) * gapSec;
     state.currencies.coins += gapCoins;
     state.stats.lifetimeCoins += gapCoins;
     state.stats.offlineCoinsEarned += gapCoins;
@@ -435,6 +438,20 @@ window.addEventListener('resize', () => {
   chase.camera.updateProjectionMatrix();
   postfx.setSize(window.innerWidth, window.innerHeight);
 });
+
+// Dev-only debug handle for testing from the console.
+if (import.meta.env.DEV) {
+  (window as unknown as Record<string, unknown>).__everroad = {
+    state,
+    runtime,
+    vehicle,
+    economy,
+    save,
+    bus,
+    daynight,
+    weather,
+  };
+}
 
 window.addEventListener('beforeunload', () => save.saveGame(state));
 document.addEventListener('visibilitychange', () => {

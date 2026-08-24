@@ -12,6 +12,7 @@
     "esModuleInterop": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "types": ["vite/client"],
     "useDefineForClassFields": true,
     "noEmit": true
   },

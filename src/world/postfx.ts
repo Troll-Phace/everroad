@@ -7,6 +7,7 @@ import {
   BloomEffect,
   VignetteEffect,
   SMAAEffect,
+  HueSaturationEffect,
   KernelSize,
 } from 'postprocessing';
 import type { GameSettings } from '../types';
@@ -59,7 +60,9 @@ export class PostFX {
       mipmapBlur: true,
     });
     const vignette = new VignetteEffect({ darkness: 0.42, offset: 0.28 });
-    const effects: Array<GodRaysEffect | BloomEffect | VignetteEffect | SMAAEffect> = [this.godRays, bloom, vignette];
+    // Painterly punch: push saturation past realism.
+    const sat = new HueSaturationEffect({ saturation: 0.22 });
+    const effects: Array<GodRaysEffect | BloomEffect | VignetteEffect | SMAAEffect | HueSaturationEffect> = [this.godRays, bloom, sat, vignette];
     if (this.quality === 'high') effects.push(new SMAAEffect());
     this.composer.addPass(new EffectPass(this.camera, ...effects));
   }
