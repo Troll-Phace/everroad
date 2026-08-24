@@ -15,6 +15,7 @@ import {
   TIRE,
 } from './carPalette';
 import { handcraftedCar } from './models/carModel';
+import { axleFrame } from './wheelFrame';
 import type { CarStyle, CarBodyType } from '../types';
 
 /**
@@ -296,17 +297,17 @@ export function buildProceduralCar(style: CarStyle): CarRig {
         new THREE.CylinderGeometry(p.wheelR, p.wheelR, 0.26, 12),
         tireMat,
       );
-      tire.rotation.z = Math.PI / 2;
+      axleFrame(tire);
       wheel.add(tire);
       const hub = new THREE.Mesh(
         new THREE.CylinderGeometry(p.wheelR * 0.5, p.wheelR * 0.5, 0.28, 8),
         hubMat,
       );
-      hub.rotation.z = Math.PI / 2;
+      axleFrame(hub);
       wheel.add(hub);
       wheel.position.set(sx * (p.wid / 2 - 0.08), p.wheelR, sz * (p.len / 2 - p.wheelInsetZ));
       g.add(wheel);
-      // Store the tire mesh for spinning (rotate around its local Y after z-rot).
+      // Store the tire mesh for spinning (about its own axle — see axleFrame).
       wheels.push(tire);
       tire.userData.wheelGroup = wheel;
     }
@@ -335,25 +336,81 @@ export function disposeCar(rig: CarRig): void {
   for (const m of rig.ownedMaterials) m.dispose();
 }
 
+/**
+ * The largest wheel rotation we can show in one frame, in radians.
+ *
+ * A tyre is a 12-sided cylinder, so its appearance repeats every 30°. Any
+ * step past half of that is ambiguous and the eye reads it as the shortest way
+ * round — backwards, or barely moving, depending on the exact frame time. The
+ * starter car's true rate is ~72°/frame at 60 fps and 52 mph, well past the
+ * limit, so before this cap the apparent direction flipped frame to frame on
+ * nothing more than ordinary frame-time jitter.
+ *
+ * 12° leaves margin under the 15° Nyquist limit for the tyre, and clears the
+ * hubcap's coarser 8-sided 45° repeat as well.
+ *
+ * This is deliberately a per-*frame* cap, not a per-second one: the constraint
+ * is how often motion is sampled, so apparent wheel speed does scale with
+ * refresh rate. That is the sampling limit behaving correctly — converting it
+ * to a rate cap would reintroduce the aliasing at high refresh rates.
+ *
+ * The way out is not more segments — a 24-sided tyre would *halve* the limit
+ * to 7.5° — but breaking the wheel's rotational symmetry. See issue #33.
+ */
+const MAX_WHEEL_STEP = Math.PI / 15;
+
+/**
+ * Compress a per-frame wheel step to something renderable.
+ *
+ * Tracks the true physical rate to within 1% up to roughly 4 mph — so a car
+ * pulling away turns its wheels at the speed of the ground — then rolls off
+ * smoothly, reaching about 18% low at 9 mph and half the true rate by 17 mph.
+ * `MAX_WHEEL_STEP` is a supremum it approaches but never reaches, so there is
+ * no kink as a car accelerates through the threshold. A wheel at motorway
+ * speed therefore reads as "spinning fast" rather than as a specific rpm —
+ * which is what a real wheel looks like too, and is the honest limit of
+ * sampling motion 60 times a second.
+ */
+function renderableStep(step: number): number {
+  const ratio = step / MAX_WHEEL_STEP;
+  return step / Math.pow(1 + ratio * ratio * ratio * ratio, 0.25);
+}
+
+/** What both builders stash on a tyre mesh so animateCar can find its hub. */
+interface WheelUserData {
+  wheelGroup: THREE.Group;
+}
+
+function wheelGroupOf(tire: THREE.Mesh): THREE.Group {
+  return (tire.userData as WheelUserData).wheelGroup;
+}
+
+/** Keep the accumulated angle bounded over a long idle session. */
+function wrapAngle(a: number): number {
+  const turn = Math.PI * 2;
+  return a - Math.floor(a / turn) * turn;
+}
+
 /** Spin wheels & bob hover pads. Call each frame. */
 export function animateCar(rig: CarRig, speedMps: number, dt: number, time: number): void {
-  for (const w of rig.wheels) {
-    // Tire cylinder was rotated z=90°, so forward rolling is local Y.
-    // Angular rate is ground speed over the rig's real wheel radius.
-    w.rotation.y -= (speedMps * dt) / rig.wheelRadius;
-    // children[1] is the hub. Handcrafted rigs may model a wheel as one piece,
-    // in which case the slot holds a placeholder.
-    const hub = (w.userData.wheelGroup as THREE.Group).children[1];
-    if (hub) hub.rotation.y = w.rotation.y;
-  }
-  if (rig.hoverPads.length) {
-    const bob = Math.sin(time * 3.1) * 0.05;
-    rig.group.position.y += 0; // bob applied by vehicle via hoverBob()
-    for (let i = 0; i < rig.hoverPads.length; i++) {
-      const pad = rig.hoverPads[i];
-      (pad.material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.25 * Math.sin(time * 5 + i * 1.7);
+  if (rig.wheelRadius > 0) {
+    // Angular rate is ground speed over the rig's real wheel radius, capped at
+    // what 60 frames a second can actually depict. The mesh is in its axle
+    // frame (see axleFrame), so local Y is the roll axis.
+    const step = renderableStep(Math.abs(speedMps * dt) / rig.wheelRadius) * Math.sign(speedMps);
+    for (const w of rig.wheels) {
+      w.rotation.y = wrapAngle(w.rotation.y - step);
+      // children[1] is the hub. Handcrafted rigs may model a wheel as one
+      // piece, in which case the slot holds a placeholder.
+      const hub = wheelGroupOf(w).children[1];
+      if (hub) hub.rotation.y = w.rotation.y;
     }
-    void bob;
+  }
+  // The vertical bob itself is applied by the vehicle via hoverBob(); here the
+  // pads only pulse.
+  for (let i = 0; i < rig.hoverPads.length; i++) {
+    const pad = rig.hoverPads[i];
+    (pad.material as THREE.MeshBasicMaterial).opacity = 0.5 + 0.25 * Math.sin(time * 5 + i * 1.7);
   }
 }
 

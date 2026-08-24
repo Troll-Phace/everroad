@@ -538,10 +538,23 @@ and the car never exceeds its stated limit (commit `6fb1a21`).
 ### 6.3 Car meshes (`world/car.ts`)
 
 `buildCar(style: CarStyle) → CarRig` constructs a low-poly car from a body type
-and a palette — no models are loaded. Body types span compact, sedan, wagon,
-pickup, van, classic, muscle, sports, super, and hover. `animateCar` spins the
-wheels against ground speed and adds body roll; `hoverBob` is the Auroracraft's
-idle float. Shared constants: `GLASS`, `TIRE`, `HUB`.
+and a palette — no models are loaded, unless a handcrafted recipe exists for
+the body type (docs/MODELS.md); `compact`, the starter, is the one that does.
+Body types span compact, sedan, wagon, pickup, van, classic, muscle, sports,
+super, and hover. `animateCar` rolls the wheels and adds body roll; `hoverBob`
+is the Auroracraft's idle float. Shared constants: `GLASS`, `TIRE`, `HUB`.
+
+Two wheel traps, both fixed in `fix/wheel-spin` and both easy to reintroduce:
+
+- Wheel meshes must carry Euler order **`ZYX`** (`world/wheelFrame.ts`,
+  `axleFrame`). Under the default `XYZ`, advancing `rotation.y` after the 90°
+  Z tilt rotates about the parent's vertical axis and the wheel yaws flat in
+  the arch instead of rolling. Same class of trap as the camera Euler clamp in
+  §6.4.
+- The per-frame spin is capped at `MAX_WHEEL_STEP` (12°). A 12-sided tyre
+  repeats every 30°, so anything past 15°/frame is ambiguous and frame-time
+  jitter flips the apparent direction. Above roughly 4 mph the wheel therefore
+  turns slower than the ground; that is a sampling limit, not a bug.
 
 Swapping cars rebuilds the rig. Anything holding a reference into the old rig
 (camera target, exhaust emitters, audio position) has to be re-pointed on

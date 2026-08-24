@@ -10,8 +10,10 @@
  *  - a wheel spins about its mesh's **local Y**, because the procedural tyre
  *    is a cylinder turned 90° about Z. Handcrafted wheel geometry is authored
  *    in its final orientation, so it is counter-rotated into the same frame
- *    and the mesh carries the same `rotation.z`. Net orientation is identical;
- *    the spin axis is now the axle.
+ *    and put into the same axle frame — the same `rotation.z` and the same
+ *    `ZYX` Euler order, without which `rotation.y` yaws the wheel rather than
+ *    rolling it (see `axleFrame` in wheelFrame.ts). Net orientation is
+ *    identical; the spin axis is now the axle.
  *  - `wheelGroup.children` is `[tire, hub]`. A rig without a modelled hub gets
  *    an empty placeholder so the index stays valid.
  */
@@ -19,6 +21,7 @@
 import * as THREE from 'three';
 import type { CarStyle } from '../../types';
 import type { CarRig } from '../car';
+import { axleFrame } from '../wheelFrame';
 import {
   GLASS,
   GLOW_COLOR,
@@ -85,7 +88,7 @@ export function buildRigFromModel(model: EncodedModel, style: CarStyle): CarRig 
         spinFrame(geometryOf(part)),
         material(part.slot, style, additive),
       );
-      tire.rotation.z = Math.PI / 2;
+      axleFrame(tire);
       tire.castShadow = true;
       wheelGroup.add(tire);
 
@@ -95,7 +98,7 @@ export function buildRigFromModel(model: EncodedModel, style: CarStyle): CarRig 
           spinFrame(geometryOf(hubPart), part.pivot, hubPart.pivot),
           material(hubPart.slot, style, additive),
         );
-        hub.rotation.z = Math.PI / 2;
+        axleFrame(hub);
         wheelGroup.add(hub);
       } else {
         wheelGroup.add(new THREE.Object3D());
