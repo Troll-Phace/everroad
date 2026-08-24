@@ -165,6 +165,13 @@ jobs:
           cache: npm
       - run: npm ci
 
+      # rpmbuild is not on the ubuntu runner by default, and electron-builder
+      # shells out to it for the rpm target. Without this the Linux job fails
+      # only on the rpm leg, after AppImage has already been produced.
+      - name: Install rpm tooling
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       # Typechecks, then produces the same dist/ the web build serves.
       - name: Build the web bundle
         run: npm run build

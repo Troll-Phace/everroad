@@ -31,7 +31,7 @@ export const CHANGELOG: readonly ChangelogRelease[] = [
       {
         heading: 'Added',
         items: [
-          'Everroad now ships as a **desktop app**. Release builds are wrapped in Electron and published to GitHub Releases for macOS, Windows and Linux. The browser build is unchanged and remains how the game is developed.',
+          'Everroad now ships as a **desktop app**. Release builds are wrapped in Electron and published to GitHub Releases for macOS (Apple silicon and Intel), Windows (installer or portable) and Linux (AppImage, or an RPM for Fedora/RHEL). The browser build is unchanged and remains how the game is developed.',
           "**What's New** — a button in the top-right of the main menu opens the full patch notes, newest release expanded.",
           'The build number sits in the bottom corner of the main menu and the settings panel, so a bug report can always name the build it came from.',
           '**Quit to Desktop** in settings, shown only in the desktop app. The browser build still quits to the main menu, because a tab cannot close itself.',

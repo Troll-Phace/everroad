@@ -151,8 +151,14 @@ These are the files a user downloads:
 | Platform | Assets |
 |----------|--------|
 | macOS | `Everroad-0.1.18-mac-arm64.dmg`, `-mac-x64.dmg`, and a `.zip` of each |
-| Windows | `Everroad-0.1.18-win-x64.exe` (NSIS installer) and the portable `.exe` |
-| Linux | `Everroad-0.1.18-linux-x86_64.AppImage` |
+| Windows | `Everroad-0.1.18-win-x64-setup.exe` (NSIS installer) and `-win-x64-portable.exe` |
+| Linux | `Everroad-0.1.18-linux-x86_64.AppImage` and `Everroad-0.1.18-linux-x86_64.rpm` |
+
+The two Windows names must stay distinct. Both targets emit an `.exe` for the
+same os/arch, so they shared one filename under the global `artifactName` until
+`nsis.artifactName` and `portable.artifactName` were set separately — the
+second upload overwrote the first, then timed out and failed the v0.1.17
+release outright. If you add a Windows target, give it its own name.
 
 The release will list more assets than that. With `publish: github`,
 electron-builder also emits update metadata — `latest.yml`, `latest-mac.yml`,
@@ -263,6 +269,18 @@ count grows, but for a new release it will always appear at first.
 chmod +x Everroad-0.1.18-linux-x86_64.AppImage
 ./Everroad-0.1.18-linux-x86_64.AppImage
 ```
+
+On Fedora or RHEL, install the RPM instead:
+
+```bash
+sudo dnf install ./Everroad-0.1.18-linux-x86_64.rpm
+```
+
+The RPM is unsigned, so `dnf` will ask to confirm an untrusted package. Building
+it needs `rpmbuild` on the runner, which the release workflow installs on the
+Linux job; `linux.maintainer` in electron-builder.yml is required for rpm and
+deb, and is a GitHub noreply address rather than a personal one because it goes
+into public package metadata.
 
 No signing gate on Linux.
 
