@@ -15,6 +15,14 @@ the generated module.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The Linux RPM build now offers you the right file to update with.** On
+  Fedora and its relatives, checking for an update fetched the AppImage instead
+  of the RPM — a 128 MB download landing in your Downloads folder that your
+  package manager had no idea what to do with. It now hands back the RPM, the
+  way the Windows and AppImage builds have always handed back theirs.
+
 ## [0.1.19] - 2026-08-24
 
 ### Fixed

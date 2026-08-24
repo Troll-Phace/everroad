@@ -1696,6 +1696,21 @@ find it yourself": the same file the feed names is downloaded, its SHA-512
 checked against the feed's, written to Downloads and revealed in the file
 manager. Only the last click is the player's.
 
+**Which file the manual path downloads is a second decision, and it is not
+`files[0]`.** `latest-*.yml` lists every artifact for the platform, so the feed
+alone does not say which one this machine wants. Two axes matter. Architecture:
+`latest-mac.yml` lists x64 first, so taking the first entry handed every Apple
+Silicon user the Intel build. Package format: both Linux artifacts are named
+`linux-x86_64`, so both survive the arch filter and the AppImage — listed first
+— went to rpm users, who got a 128 MB file their package manager cannot
+install. `pickFile` therefore filters by arch token, then by format:
+`.dmg` over `.zip` on macOS, and on Linux whichever of `.AppImage` / `.rpm`
+matches `linuxPackageFormat()`. That reads `APPIMAGE` first, since the AppImage
+runtime sets it and it is proof rather than inference, and otherwise looks for
+an rpm database — an extracted AppImage run without its launcher has no
+`APPIMAGE` set, and handing that user an `.rpm` would be the same bug one step
+over. With neither signal it falls back to the AppImage, which runs anywhere.
+
 **`release-meta.json`, and why a version number is not enough.** The one thing
 the feed cannot answer is the question worth asking before pressing Download:
 *will this still read my journey?* `SAVE_VERSION` is a compile-time constant
