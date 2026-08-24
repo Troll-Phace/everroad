@@ -1,10 +1,10 @@
 /**
- * Engine layer: a quiet, cozy hum — never racey.
+ * Engine layer: a quiet, non-tonal bed — never racey.
  *
- * Brown noise through a heavy lowpass gives the body ("road rumble"), a low
- * sawtooth + sine pair gives a faint motor tone. Pitch and loudness scale
- * subtly with speed (idle ~55 Hz rising toward ~110 Hz). While drifting, a
- * faint bandpassed white-noise "shhh" tire layer fades in.
+ * Brown noise through a heavy lowpass gives the body ("road rumble") that
+ * swells subtly with speed. There is deliberately NO pitched motor tone —
+ * a hum that rises with speed proved annoying on long cruises. While
+ * drifting, a faint bandpassed white-noise "shhh" tire layer fades in.
  */
 
 import { clamp, loopingNoise } from './helpers';
@@ -26,45 +26,6 @@ export function createEngineLayer(
   bed.filter.Q.value = 0.4;
   bed.gain.gain.value = 0.02;
 
-  // --- motor tone: low saw + sine through a lowpass ------------------------
-  const toneFilter = ctx.createBiquadFilter();
-  toneFilter.type = 'lowpass';
-  toneFilter.frequency.value = 220;
-  toneFilter.Q.value = 0.5;
-  const toneGain = ctx.createGain();
-  toneGain.gain.value = 0.012;
-  toneFilter.connect(toneGain);
-  toneGain.connect(out);
-
-  const saw = ctx.createOscillator();
-  saw.type = 'sawtooth';
-  saw.frequency.value = 55;
-  const sawGain = ctx.createGain();
-  sawGain.gain.value = 0.55;
-  saw.connect(sawGain);
-  sawGain.connect(toneFilter);
-  saw.start();
-
-  const sub = ctx.createOscillator();
-  sub.type = 'sine';
-  sub.frequency.value = 55;
-  const subGain = ctx.createGain();
-  subGain.gain.value = 1;
-  sub.connect(subGain);
-  subGain.connect(toneFilter);
-  sub.start();
-
-  // Very slow wobble on the motor pitch so the hum breathes a little.
-  const wobble = ctx.createOscillator();
-  wobble.type = 'sine';
-  wobble.frequency.value = 0.11;
-  const wobbleDepth = ctx.createGain();
-  wobbleDepth.gain.value = 1.2; // Hz
-  wobble.connect(wobbleDepth);
-  wobbleDepth.connect(saw.frequency);
-  wobbleDepth.connect(sub.frequency);
-  wobble.start();
-
   // --- drift tires: white noise "shhh" -------------------------------------
   const drift = loopingNoise(ctx, buffers.white, out);
   drift.filter.type = 'bandpass';
@@ -81,11 +42,6 @@ export function createEngineLayer(
       if (Math.abs(speedMph - lastSpeed) > 0.4) {
         lastSpeed = speedMph;
         const t = clamp(speedMph / 120, 0, 1);
-        const f = 55 + 55 * t;
-        saw.frequency.setTargetAtTime(f, now, 0.35);
-        sub.frequency.setTargetAtTime(f, now, 0.35);
-        toneGain.gain.setTargetAtTime(0.008 + 0.014 * t, now, 0.5);
-        toneFilter.frequency.setTargetAtTime(180 + 160 * t, now, 0.5);
         bed.gain.gain.setTargetAtTime(0.015 + 0.03 * t, now, 0.5);
         bed.filter.frequency.setTargetAtTime(120 + 220 * t, now, 0.5);
       }

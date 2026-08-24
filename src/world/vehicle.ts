@@ -75,14 +75,18 @@ export class Vehicle {
     const cruise = this.getCruiseMph() * MPH_TO_MPS;
 
     // ---- speed ----
-    let targetSpeed = cruise;
+    // The car's stated speed is a hard ceiling. Autopilot cruises a touch
+    // under it; holding W tops it out, S brakes down to ~40%.
+    let targetSpeed = cruise * 0.94;
     if (active) {
       const th = this.input.throttle;
-      targetSpeed = cruise * (th > 0 ? 1 + 0.3 * th : 1 + 0.6 * th);
+      if (th > 0) targetSpeed = cruise;
+      else if (th < 0) targetSpeed = cruise * (0.94 + 0.54 * th);
     }
     if (Math.abs(this.lateral) > ROAD_HALF_WIDTH + 0.6) targetSpeed *= 0.82; // shoulder rumble
-    const accel = targetSpeed > this.speedMps ? 6.5 : 10;
-    this.speedMps = THREE.MathUtils.damp(this.speedMps, targetSpeed, accel / Math.max(targetSpeed, 8), dt);
+    targetSpeed = Math.min(targetSpeed, cruise);
+    const lambda = targetSpeed > this.speedMps ? 0.45 : 0.9;
+    this.speedMps = Math.min(THREE.MathUtils.damp(this.speedMps, targetSpeed, lambda, dt), cruise);
 
     // ---- steering / lateral ----
     const steer = this.input.steer;

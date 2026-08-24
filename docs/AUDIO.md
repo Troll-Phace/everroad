@@ -15,7 +15,7 @@ Entry point: `src/audio/audio.ts` → `createAudioEngine(): AudioEngine`
 | `audio.ts` | Graph wiring, bus/master chain, lifecycle (start/enable/volumes), mood-change detection, one-shot dispatch |
 | `palettes.ts` | Per-biome key/mode data: root note, melody scale, chord progression, brightness |
 | `music.ts` | Pad chords, phase (time-of-day) shaping, wind-chime melody + feedback delay |
-| `engineSound.ts` | Engine hum bed + drift tire layer |
+| `engineSound.ts` | Engine rumble bed (noise-only) + drift tire layer |
 | `nature.ts` | Wind, birds, crickets, rain bed + thunder rumbles, aurora shimmer |
 | `sfx.ts` | One-shots: coin/relic pickups, achievement, purchase, near-miss, prestige |
 | `helpers.ts` | Noise buffer generation, `rampTo` (click-free param ramps), midi→Hz, RNG |
@@ -35,8 +35,7 @@ MUSIC BUS (setMusicVolume)
                                                                                               musicBus
 SFX BUS (setSfxVolume)                                                                             │
   engine: brown noise ─▶ LP(~140–340) ─▶ gain      ┐                                               │
-          saw+sine(55→110 Hz) ─▶ LP(~180–340) ─▶ g ├───────────────────────────────────────────────┤
-          drift: white noise ─▶ BP(1.7k) ─▶ gain   ┘                                               │
+          drift: white noise ─▶ BP(1.7k) ─▶ gain   ┘───────────────────────────────────────────────┤
   nature: wind pink noise ─▶ BP(wandering ~320–640) ─▶ gain (slow swell LFO)                       │
           rain white noise ─▶ LP(5.2k) ─▶ HP(420) ─▶ gain                                          │
           birds / crickets / thunder (scheduled one-shots) ────────────────────────────────────────┤
@@ -100,11 +99,12 @@ sub. All feed a shared lowpass whose cutoff breathes with a 0.06 Hz LFO.
 ### 2. Engine (`engineSound.ts`)
 
 Deliberately soft — a cozy presence, not a motor sport. Brown noise through
-a heavy lowpass is the road-rumble body; a saw+sine pair (with a 0.11 Hz
-±1.2 Hz pitch wobble) is the faint motor tone. Speed maps 0→120 mph onto
-pitch 55→110 Hz and modest gain/cutoff increases, smoothed with
-`setTargetAtTime` (~0.5 s) so speed changes glide. Drifting fades in a
-bandpassed white-noise "shhh" at 1.7 kHz (fast in, slow out).
+a heavy lowpass is the road-rumble body; speed maps 0→120 mph onto modest
+gain/cutoff increases, smoothed with `setTargetAtTime` (~0.5 s) so speed
+changes glide. There is intentionally **no pitched motor tone** — a hum that
+rose with speed proved grating on long cruises, so the bed is purely
+noise-based. Drifting fades in a bandpassed white-noise "shhh" at 1.7 kHz
+(fast in, slow out).
 
 ### 3. Nature (`nature.ts`)
 
