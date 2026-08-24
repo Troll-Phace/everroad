@@ -21,6 +21,7 @@ read those before delegating or implementing.
 13. [Contract Reference](#13-contract-reference)
 14. [Performance Budgets](#14-performance-budgets)
 15. [Quick Reference](#15-quick-reference)
+16. [Desktop Packaging & Releases](#16-desktop-packaging--releases)
 
 ---
 
@@ -132,6 +133,12 @@ TypeScript (strict) on Vite 6, Three.js r185, pmndrs `postprocessing` for the
 effect composer, Web Audio for everything audible, `localStorage` for
 persistence. No backend, no runtime dependency beyond those two packages.
 
+Release builds are additionally wrapped for the desktop by Electron, packaged
+by `electron-builder`, and published to GitHub Releases. Both are build-time
+devDependencies: nothing Electron-shaped is bundled into the web build, and the
+game does not know which of the two it is running in beyond a single feature
+check (§16). Development happens in the browser, unchanged.
+
 ### 3.2 Repository layout
 
 ```
@@ -195,6 +202,13 @@ src/
   save/
     save.ts            load/save/export/import/migrate/offline calc
 
+  version/             Build identity — a leaf: imports nothing from the game
+    version.ts         APP_VERSION / BUILD_COMMIT / BUILD_DATE, runtime(), buildLabel()
+    desktop.ts         Typed window.everroad bridge; null in the browser
+    changelog.generated.ts  GENERATED patch notes (npm run changelog)
+
+  vite-env.d.ts        Ambient declarations for the Vite `define` constants
+
   ui/                  DOM only, reads state, calls UIActions
     ui.ts              initUI(deps: UIDeps)
     hud.ts             Corner HUD + its rAF loop
@@ -215,9 +229,24 @@ assets/models/
   src/*.py             Model recipes — the source of truth
   *.evr.json           Exported intermediates, committed so CI needs no Blender
 
+electron/              The desktop shell (§16). No game code lives here.
+  main.cjs             Main process: window, CSP, navigation policy, IPC
+  preload.cjs          contextBridge -> window.everroad, and nothing else
+
+build/
+  icon.png             1024x1024 app icon; electron-builder derives the rest
+                       (drawn by scripts/build-icon.mjs)
+
+release/               electron-builder output — git-ignored
+
 scripts/
   build-models.mjs     .evr.json -> src/world/models/generated.ts
   lib/model-codec.mjs  Validator, budgets, encoder
+  build-changelog.mjs  CHANGELOG.md -> src/version/changelog.generated.ts
+  lib/changelog-parse.mjs  Changelog parser + the version/date validators
+  lib/build-info.mjs   Build stamp shared by vite.config and vitest.config
+  release-notes.mjs    One version's CHANGELOG section, for the Release body
+  build-icon.mjs       Draws build/icon.png
   check-bundle-size.mjs
 ```
 
@@ -258,6 +287,10 @@ convention in the codebase:
 
 - Every module imports shared types from `src/types.ts` only, plus files inside
   its own directory. A shared type declared anywhere else forks the contract.
+  Two shared leaves are the sanctioned exceptions, both of them dependency-free
+  and importable from anywhere: `src/events.ts` (the typed `EventBus`) and
+  `src/version/` (build identity and patch notes, §16.5). Both import nothing
+  from the game, which is what keeps them from becoming a second `types.ts`.
 - `game/`, `save/`, and `audio/` never reference `document`, `window` (beyond
   Web Audio construction), or Three.js. This is what makes them testable.
 - `ui/` never imports Three.js. It reads `state` and `runtime` as live objects
@@ -1215,6 +1248,11 @@ them live.
 | `npm run models:check` | Fail if the generated module is stale — the CI gate |
 | `npm run models:blender` | Re-run the Blender recipes (needs Blender locally) |
 | `npm run models:smoke` | Exporter regression test (needs Blender locally) |
+| `npm run changelog` | Rebuild `src/version/changelog.generated.ts` from CHANGELOG.md |
+| `npm run changelog:check` | Fail if it is stale or the versions disagree — the CI gate |
+| `npm run electron` | Run the built `dist/` inside the Electron shell |
+| `npm run electron:dir` | Build + package unpacked into `release/` — the fast check |
+| `npm run electron:build` | Build + real installers into `release/`, publishing nothing |
 
 ### Fixed decisions
 
@@ -1230,6 +1268,10 @@ them live.
 | Asset authoring | procedural by default; individual assets may be replaced by a Blender model compiled into the bundle at build time (docs/MODELS.md) |
 | Repository | `Troll-Phace/everroad`, default branch `main` |
 | CI | `.github/workflows/ci.yml`; `.githooks/pre-push` mirrors it locally |
+| Versioning | Semantic, pre-1.0; every change is a patch bump, tagged `vX.Y.Z` |
+| Patch notes | CHANGELOG.md is the source of truth; the in-game module is generated |
+| Desktop shell | Electron, `contextIsolation` + `sandbox` on, `nodeIntegration` off |
+| Code signing | None — builds are unsigned (docs/RELEASING.md) |
 
 ### Tuning constants at a glance
 
@@ -1256,6 +1298,236 @@ them live.
 - docs/UI.md — panel-by-panel overlay specification
 - docs/DESIGN_SYSTEM.md — tokens, component specs, motion, accessibility
 - docs/MODELS.md — the Blender -> bundle model pipeline
+- docs/RELEASING.md — the release procedure, and the unsigned-build caveat
 - docs/BUILDLOG.md — running build diary
+
+---
+
+## 16. Desktop Packaging & Releases
+
+### 16.1 Two runtimes, one bundle
+
+Everroad ships to two places and builds only once. `vite build` produces
+`dist/`; the web version serves it, and the desktop version is that same
+directory loaded over `file://` inside an Electron window. There is no desktop
+fork of the game, no build flag that changes what the game does, and no
+Electron import anywhere under `src/`.
+
+**Development does not move.** `npm run dev` is the Vite dev server on port
+5199, in a browser, exactly as before — that is where the game is built and
+playtested, and the Electron path is a packaging concern that runs at release
+time. `electron/main.cjs` can load the dev server when `ELECTRON_DEV=1` is set,
+but that is a convenience for debugging the shell itself, not a workflow.
+Anything that made the browser the second-class target would be a regression:
+the browser is where the frame budget in §14 is measured.
+
+The renderer therefore has to work with no desktop shell at all. The bridge is
+strictly additive — every desktop affordance is written against `desktop()`
+returning `null`, and the web build is the case that must not break.
+
+### 16.2 Process model, and why the hardening is not optional
+
+Electron gives a renderer as much or as little of Node as you configure. Three
+settings in `electron/main.cjs` decide it, and all three are load-bearing:
+
+```
+contextIsolation: true     preload globals live in a separate V8 context
+nodeIntegration: false     no require/process/Buffer in the page
+sandbox: true              the renderer runs in the OS sandbox
+```
+
+The reason to treat these as a hard rule rather than a default worth revisiting
+is the shape of this particular renderer. It runs Three.js, a shader compiler,
+and a postprocessing stack — a large third-party surface parsing a lot of data
+— and it loads a webfont over the network. Any of that going wrong in a browser
+tab costs the tab. The same thing going wrong with `nodeIntegration: true`
+costs the user's filesystem. The safety property is worth more than any
+convenience that turning them off would buy, and nothing in the game wants Node
+anyway.
+
+Everything else follows from the same reasoning. `setWindowOpenHandler` denies
+every popup unconditionally and hands nothing to the real browser: the game has
+no `window.open`, no anchor and no `target="_blank"`, so a `shell.openExternal`
+there could only ever be reached by something that was not us — a way to launch
+an attacker-chosen URL and nothing else. It comes back, allowlisted by host, on
+the day the game grows a real outbound link. `will-navigate` and `will-redirect`
+refuse anything that is not the app's own content, and "own content" means the
+one `file:` URL of the built `dist/index.html`, compared exactly — matching on
+the `file:` scheme alone would make `file:///etc/passwd` own content and give
+the guard away. Webviews are refused outright.
+
+Permissions are denied with exactly one exception:
+`clipboard-sanitized-write`, which is what `navigator.clipboard.writeText`
+asks for and what Settings' "Copy save code" button is built on. A blanket
+denial is the tempting default and it is wrong here — it turned a feature that
+works in every browser into a "Copy failed" toast in the shipped binary, with
+nothing thrown and nothing logged. Camera, microphone, geolocation and
+notifications stay denied, because the game genuinely asks for none of them.
+`setPermissionCheckHandler` is set to the same predicate, so the synchronous
+and asynchronous paths cannot disagree.
+
+### 16.3 The Content-Security-Policy
+
+Set as a response header on the default session, so it covers the document and
+every asset:
+
+```
+default-src 'self';  script-src 'self';
+style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+font-src 'self' https://fonts.gstatic.com;
+img-src 'self' data: blob:;  connect-src 'self';
+object-src 'none';  base-uri 'none';  frame-src 'none';
+form-action 'none'
+```
+
+`form-action` is spelled out because it does not fall back to `default-src`;
+the page has no forms and must not be able to post one anywhere. The directives
+are built as a keyed map and joined at the end, so the dev-mode relaxation below
+rewrites them by name — a positional edit is correct until someone reorders the
+list, and then it silently loosens the wrong directive.
+
+Each relaxation is something the shipped page genuinely needs, and the list is
+short enough to audit at a glance. `index.html` links a Google Fonts stylesheet,
+which is why those two hosts appear. `style-src 'unsafe-inline'` covers the
+inline styles the overlay writes. `img-src data:` covers the emoji favicon.
+
+The important line is `script-src 'self'` with neither `'unsafe-inline'` nor
+`'unsafe-eval'`: it is what makes an injected string unable to become code, and
+it is the directive to defend when something asks for an exception. In dev mode
+the policy is loosened for Vite's inline HMR client and its websocket — that
+branch cannot run in a packaged build, because `DEV` is gated on
+`!app.isPackaged` before `ELECTRON_DEV` is even consulted. Without that gate an
+environment variable would be enough to repoint a released binary at whatever
+answers on port 5199, under a CSP that allows inline script.
+
+### 16.4 `window.everroad` — the whole main↔renderer surface
+
+`electron/preload.cjs` exposes exactly one object through `contextBridge`:
+
+```ts
+interface EverroadDesktop {
+  readonly version: string;      // app.getVersion(), via additionalArguments
+  readonly platform: string;     // process.platform
+  quit(): void;                  // ipcRenderer.send('everroad:quit')
+}
+```
+
+No `ipcRenderer`, no `require`, no `fs`, no generic "invoke any channel" escape
+hatch. A generic bridge is the mistake that quietly undoes contextIsolation, so
+this one grows one named method at a time, deliberately, each with a main-side
+handler that validates its sender.
+
+`version` arrives through `additionalArguments` rather than
+`process.env.npm_package_version`, because that env var only exists when npm
+launched the process and is absent in the packaged app — which is the case that
+matters. `app.getVersion()` reads the packaged `package.json`, so passing its
+result down through argv is the one route that is correct in both.
+
+`everroad:quit` is validated, not trusted: the request is honoured only from the
+top frame of the window the app created, showing content it recognises. A
+subframe asking to quit the application is precisely the case to refuse.
+
+`src/version/desktop.ts` shape-checks the global rather than merely testing for
+its presence — `window.everroad` is a name anything could squat on, and a
+half-formed object should fail at the boundary rather than at a call site.
+
+### 16.5 The version module
+
+`src/version/` is a leaf (§3.4): it imports nothing from the game, and the game
+imports it only to display what it says.
+
+```ts
+APP_VERSION   '0.1.17'      from package.json
+BUILD_COMMIT  'a1b2c3d'     short sha, or 'dev' with no .git
+BUILD_DATE    '2026-08-24'  the commit date
+runtime()     'desktop' | 'web'   desktop iff the bridge is present
+isDesktop()
+buildLabel()  'v0.1.17 · desktop · a1b2c3d'
+```
+
+The three constants are compile-time substitutions, not runtime lookups: Vite's
+`define` replaces them from `scripts/lib/build-info.mjs`, which reads
+package.json and `git rev-parse`. Baking them in means they cannot drift from
+the bundle they identify, and reading them costs nothing. Every git call is
+guarded — a build from a source tarball with no `.git` falls back to `'dev'`
+rather than failing — and `GITHUB_SHA` overrides, so CI stamps the real commit.
+
+`vitest.config.ts` declares the same defines from the same helper, so the module
+is unit-testable without stubbing globals. One consequence worth knowing: a
+version bump does not reach a *running* dev server, because the define was
+evaluated when the config loaded. Restart `npm run dev` after bumping.
+
+`runtime()` is the only place the game distinguishes the two builds, and it does
+it by feature detection rather than a build flag — which is what keeps one
+bundle serving both.
+
+### 16.6 CHANGELOG.md → the in-game patch notes
+
+`CHANGELOG.md` is the source of truth for what shipped. `npm run changelog`
+parses it into `src/version/changelog.generated.ts`, which the What's New panel
+renders. The generated module is **committed**, exactly as the model codegen is
+(§5.9), for the same reason: the browser fetches nothing at runtime, and CI does
+not have to regenerate before it can build.
+
+Bullet text keeps its Markdown `**bold**` intact — the panel renders that to
+`<strong>` and strips nothing else — and wrapped lines are joined into one
+string. The parser is deliberately strict, because a changelog that quietly
+half-parses ships a patch-notes panel with missing bullets that nobody notices
+for three releases. Anything it does not recognise is an error with a line
+number, and nested list items are rejected outright since the panel has no way
+to draw them.
+
+The **three-way agreement** — the git tag, `package.json`'s `version`, and the
+newest heading in `CHANGELOG.md` all naming the same release — is enforced in
+two places, and it is worth being precise about which does what.
+`npm run changelog:check` proves two of the three legs: that the changelog's
+newest entry matches `package.json`, and that the generated module matches the
+changelog. It never sees a git tag. The tag leg — tag == `v$(package.json
+version)` — is checked by the `guard` job's *Resolve and verify the version*
+step in `.github/workflows/release.yml`, before the draft release is created and
+before any platform is packaged. `changelog:check` itself runs in three places:
+`npm run verify`, the `changelog` job in CI, and again in `guard`. A build that
+lies about its own version is a build whose bug reports cannot be trusted, which
+is why both halves are repeated rather than assumed.
+
+### 16.7 The release workflow
+
+Pushing a `v*.*.*` tag runs `.github/workflows/release.yml` in three stages:
+
+```
+guard      (ubuntu)   changelog:check, npm run verify, tag == v$(package.json
+                      version), extract the notes, create the Release as a DRAFT
+package    (matrix)   macos / windows / ubuntu: npm run build,
+                      electron-builder --publish always -> upload into the draft
+finalize   (ubuntu)   write the notes, mark prerelease for 0.x, publish
+```
+
+`guard` runs the full `npm run verify` before it drafts anything, so a tag can
+never ship a commit that has not passed the same gate every PR passes — pushing
+a tag is not a way around CI. It also refuses to touch a release that is already
+published: a draft may be refreshed by a re-run, but overwriting a published
+release changes what a version means for everyone who already downloaded it.
+
+The draft is created up front so three concurrent `electron-builder` runs cannot
+race to create the same release, and it means a failure part-way leaves an
+unpublished draft rather than a broken public release. The release body is the
+version's own CHANGELOG section, extracted by `scripts/release-notes.mjs` rather
+than hand-copied, so the notes are written exactly once. Everroad is pre-1.0, so
+every `0.x` release is marked a prerelease automatically.
+
+Targets: `dmg` + `zip` for macOS on x64 and arm64 separately (a universal binary
+would make every user download the slice they cannot run), `nsis` plus a
+portable `.exe` for Windows, and an `AppImage` for Linux. The packaged app
+contains `dist/`, the two files in `electron/`, and `package.json` — no
+`node_modules`, because Vite has already bundled Three.js and postprocessing and
+the main process requires nothing else.
+
+**Builds are unsigned.** There is no Apple Developer certificate and no Windows
+code-signing certificate, so macOS Gatekeeper and Windows SmartScreen both warn
+on first launch. That is expected rather than a build fault, and
+docs/RELEASING.md documents exactly what a user sees on each OS and how to get
+past it.
+
+---
 
 *This document evolves with the implementation.*

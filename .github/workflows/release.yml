@@ -1,0 +1,207 @@
+# Desktop release: tag -> three platform builds -> one GitHub Release.
+#
+# The release is created as a draft by `guard`, filled by the `package` matrix,
+# and published by `finalize`. Creating it up front is what keeps three
+# concurrent electron-builder runs from racing to create the same release.
+#
+# BUILDS ARE UNSIGNED. There is no Apple Developer certificate and no Windows
+# code-signing certificate for this project, so macOS Gatekeeper will refuse
+# the first launch ("Everroad is damaged" / "cannot be opened") until the user
+# right-clicks -> Open, and Windows SmartScreen will show "Windows protected
+# your PC" until they choose More info -> Run anyway. docs/RELEASING.md spells
+# out exactly what a user sees on each OS.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  # Manual trigger. It publishes from whatever ref it is dispatched on, using
+  # that ref's package.json version as the tag — there is no tag to check
+  # against, so the tag leg of the three-way agreement is simply absent. It is
+  # an escape hatch for a release whose tag push failed, not a second way to
+  # release. See the "Releasing by hand" section of docs/RELEASING.md.
+  workflow_dispatch:
+
+# No workflow-level permissions. Each job below asks for exactly what it needs,
+# so a job that is added later starts from the repository default rather than
+# inheriting a write token nobody looked at.
+#
+# Worth being honest about the limit: GitHub scopes the token per *job*, not per
+# step, and all three jobs here do need `contents: write` at some point — guard
+# drafts the release, package uploads assets into it, finalize publishes it. So
+# the write token is still present while `npm ci` runs in the matrix. Making the
+# grant explicit per job is the improvement; removing it from the matrix is not
+# possible without splitting the upload into a separate job.
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '22'
+
+jobs:
+  guard:
+    name: Guard & draft release
+    runs-on: ubuntu-latest
+    permissions:
+      # Creates the draft release.
+      contents: write
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      tag: ${{ steps.resolve.outputs.tag }}
+      prerelease: ${{ steps.resolve.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      # The three-way agreement: the tag, package.json's version and
+      # CHANGELOG.md's newest entry all name the same release. A tag that
+      # disagrees must fail here rather than ship a mislabelled build.
+      - name: Changelog, package version and generated module agree
+        run: npm run changelog:check
+
+      # The full gate, the same one every PR passes: typecheck, vitest, the two
+      # codegen checks, the production build and the bundle-size budget. It runs
+      # here — before the draft exists and before any platform is packaged — so
+      # a tag can never ship a commit that has not passed CI. A tag pushed to a
+      # commit that was never green is exactly the case this catches.
+      - name: Verify
+        run: npm run verify
+
+      - name: Resolve and verify the version
+        id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(node -p "require('./package.json').version")"
+          EXPECTED="v${VERSION}"
+          if [ "${{ github.ref_type }}" = "tag" ]; then
+            TAG="${{ github.ref_name }}"
+            if [ "$TAG" != "$EXPECTED" ]; then
+              echo "::error::Tag ${TAG} does not match package.json version ${VERSION}." \
+                   "Expected ${EXPECTED}. Bump package.json and CHANGELOG.md together," \
+                   "then re-tag — see docs/RELEASING.md."
+              exit 1
+            fi
+          else
+            # workflow_dispatch: no tag to check against, so the package
+            # version is authoritative.
+            TAG="$EXPECTED"
+            echo "::notice::Manual run — releasing ${TAG} from ${{ github.ref_name }}."
+          fi
+          # Everroad is pre-1.0: every 0.x build is a prerelease.
+          case "$VERSION" in
+            0.*) PRERELEASE=true ;;
+            *)   PRERELEASE=false ;;
+          esac
+          {
+            echo "version=${VERSION}"
+            echo "tag=${TAG}"
+            echo "prerelease=${PRERELEASE}"
+          } >> "$GITHUB_OUTPUT"
+
+      # The release body is that version's CHANGELOG.md section, extracted
+      # rather than hand-copied, so the notes are written exactly once.
+      - name: Extract release notes
+        shell: bash
+        run: node scripts/release-notes.mjs "${{ steps.resolve.outputs.version }}" > RELEASE_NOTES.md
+
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            # A draft can be refreshed — that is a re-run of a release that
+            # never finished. A *published* release must not be touched: people
+            # have already downloaded those assets, and overwriting them changes
+            # what a version means. docs/RELEASING.md: bump to the next patch.
+            if [ "$(gh release view "$TAG" --json isDraft --jq '.isDraft')" != "true" ]; then
+              echo "::error::Release ${TAG} is already published. Never re-tag a published" \
+                   "version — bump to the next patch instead. See docs/RELEASING.md."
+              exit 1
+            fi
+            echo "Draft release $TAG already exists — updating its notes."
+            gh release edit "$TAG" --notes-file RELEASE_NOTES.md
+          else
+            gh release create "$TAG" \
+              --draft \
+              --title "Everroad $TAG" \
+              --notes-file RELEASE_NOTES.md
+          fi
+
+      - name: Keep the notes for the finalize step
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: RELEASE_NOTES.md
+          retention-days: 7
+
+  package:
+    name: Package (${{ matrix.os }})
+    needs: guard
+    runs-on: ${{ matrix.os }}
+    permissions:
+      # electron-builder uploads each platform's assets into the draft.
+      contents: write
+    strategy:
+      # One platform failing should not cancel the other two — a partial
+      # release is easier to complete than to restart.
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+
+      # Typechecks, then produces the same dist/ the web build serves.
+      - name: Build the web bundle
+        run: npm run build
+
+      - name: Package and upload to the draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Unsigned by design; make sure electron-builder does not go looking
+          # for a certificate and fail the job on macOS.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: npx electron-builder --publish always
+
+  finalize:
+    name: Publish the release
+    needs: [guard, package]
+    runs-on: ubuntu-latest
+    permissions:
+      # Flips the draft to published.
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.guard.outputs.tag }}
+          PRERELEASE: ${{ needs.guard.outputs.prerelease }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release edit "$TAG" \
+            --draft=false \
+            --prerelease="$PRERELEASE" \
+            --notes-file RELEASE_NOTES.md
+          echo "### Released $TAG" >> "$GITHUB_STEP_SUMMARY"
+          gh release view "$TAG" --json assets \
+            --jq '.assets[] | "- \(.name) (\(.size) bytes)"' >> "$GITHUB_STEP_SUMMARY"

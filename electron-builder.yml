@@ -1,0 +1,96 @@
+# electron-builder configuration for the Everroad desktop app.
+#
+# Kept out of package.json deliberately: this file needs more comment than
+# explanation-free JSON can carry, and package.json stays readable.
+#
+# The packaged app is the same `vite build` output the web version serves, plus
+# the two files in electron/. Nothing here is a second copy of the game.
+
+appId: com.trollphace.everroad
+productName: Everroad
+copyright: Copyright © 2026 Troll-Phace
+
+directories:
+  # Artifacts land in release/, which is git-ignored.
+  output: release
+  # Where the icon lives. electron-builder derives .icns, .ico and the AppImage
+  # sizes from build/icon.png; see scripts/build-icon.mjs.
+  buildResources: build
+
+# An explicit whitelist. node_modules is excluded because nothing in the
+# packaged app requires it: Vite has already bundled three and postprocessing
+# into dist/, and electron/*.cjs pulls in nothing but `electron` and Node
+# built-ins. That keeps the app around the size of the bundle rather than the
+# size of the checkout.
+files:
+  - dist/**/*
+  - electron/**/*
+  - package.json
+  - '!node_modules'
+
+# No native modules, so there is nothing to rebuild against Electron's headers.
+npmRebuild: false
+
+artifactName: ${productName}-${version}-${os}-${arch}.${ext}
+
+mac:
+  category: public.app-category.simulation-games
+  icon: build/icon.png
+  target:
+    - target: dmg
+      arch: [x64, arm64]
+    - target: zip
+      arch: [x64, arm64]
+  # Two per-architecture builds rather than one universal binary. A universal
+  # app is the sum of both slices — every user downloads twice what they can
+  # run — and the lipo merge step is an extra way for an unsigned ad-hoc build
+  # to fail. Separate artifacts halve the download and keep the build simple.
+  #
+  # identity: null means "do not code-sign". There is no Apple Developer
+  # certificate for this project, and an unsigned build is honest about it; see
+  # the Gatekeeper note in docs/RELEASING.md.
+  identity: null
+  notarize: false
+
+dmg:
+  # Two icons and a drag arrow. Nothing to configure beyond the window size.
+  window:
+    width: 540
+    height: 380
+
+win:
+  icon: build/icon.png
+  target:
+    # nsis is the installer; portable is a single self-contained .exe that runs
+    # without installing. It costs nothing extra to produce and it is the target
+    # that works on a locked-down machine.
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  perMachine: false
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+linux:
+  icon: build/icon.png
+  category: Game
+  synopsis: An idle infinite driving game
+  target:
+    - target: AppImage
+      arch: [x64]
+
+publish:
+  provider: github
+  owner: Troll-Phace
+  repo: everroad
+  # Draft on purpose. The release workflow creates the draft up front so three
+  # parallel matrix jobs cannot race to create the same release, uploads each
+  # platform's artifacts into it, then writes the notes and publishes it in one
+  # final step. A hand-run electron-builder therefore also lands in a draft,
+  # which is the safe way round.
+  releaseType: draft

@@ -57,6 +57,35 @@ merging its PR once CI is green — is your decision to make; ask only when
 criteria are failing, CI is red for a reason you cannot fix, or a finding is
 blocking and unresolvable.
 
+## Versioning & releases
+
+Everroad follows semantic versioning on a pre-1.0 `0.MINOR.PATCH` line: the save
+format is still allowed to move, so every shipped change lands as a patch bump
+until a deliberate 1.0.
+
+`CHANGELOG.md` at the repo root is the source of truth for release notes, and it
+is player-facing — it is what the in-game **What's New** panel renders. Write its
+entries in the game's voice, describing what changed for the player, not what
+changed in the code. Add to `## [Unreleased]` as work lands; cut a version at
+release time per docs/RELEASING.md.
+
+Three things must agree: the `version` in package.json, the newest heading in
+CHANGELOG.md, and the `vX.Y.Z` tag that triggers the release workflow. Two
+different checks enforce that, and it matters which is which. `changelog:check`
+(inside `npm run verify`) proves the first two legs plus the generated module —
+it never sees a tag. The tag leg is checked by the `guard` job in
+release.yml, before anything is published. So a local `npm run verify` does not
+tell you the tag is right; only the release workflow does.
+
+`npm run changelog` regenerates `src/version/changelog.generated.ts` from
+CHANGELOG.md. Never hand-edit the generated module.
+
+Release builds are Electron-wrapped and published to GitHub Releases for macOS,
+Windows and Linux. **The dev server is unchanged** — `npm run dev` in the browser
+at port 5199 remains how the game is developed and how the Browser pane tests it.
+Everything the desktop app adds is additive and degrades to the web path when
+`window.everroad` is absent. See ARCHITECTURE.md §16.
+
 ## Conventions
 
 Branches: feat/{desc}, fix/{desc}, perf/{desc}, refactor/{desc}, docs/{desc},

@@ -3,3 +3,4 @@ node_modules/
 package-lock.json
 assets/models/*.evr.json
 src/world/models/generated.ts
+src/version/changelog.generated.ts

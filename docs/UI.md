@@ -10,19 +10,21 @@ initUI(deps); // deps: UIDeps from types.ts
 
 ## File layout
 
-| File | Role |
-|------|------|
-| `src/ui/ui.ts` | Entry point: mounts menu/HUD/effects/panels, global keyboard handling, app-mode wiring, first-run help |
-| `src/ui/mainMenu.ts` | Main menu over attract-mode footage (Continue / New Journey / Settings) |
-| `src/ui/transition.ts` | The mode fade — the full-screen cover every `startGame`/`quitToMenu` runs behind |
-| `src/ui/confirm.ts` | `armConfirm` — two-step arm-and-confirm for destructive buttons |
-| `src/ui/ui.css` | All UI styles (imported by `ui.ts`); builds on the glass CSS variables in `src/style.css` |
-| `src/ui/hud.ts` | Corner HUD + the requestAnimationFrame update loop |
-| `src/ui/panels.ts` | `PanelManager` — one center glass card at a time, open/close/refresh lifecycle |
-| `src/ui/panelGarage.ts` … `panelHelp.ts` | One module per panel (garage, upgrades, trophies, prestige, settings, help) |
-| `src/ui/effects.ts` | Toasts, biome banner, offline-summary modal, prestige flash |
-| `src/ui/dom.ts` | DOM helpers (`el`, change-detecting `textUpdater`/`classToggler`, `replayAnimation`) |
-| `src/ui/icons.ts` | Emoji maps for currencies, time-of-day, weather |
+| File                                     | Role                                                                                                   |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `src/ui/ui.ts`                           | Entry point: mounts menu/HUD/effects/panels, global keyboard handling, app-mode wiring, first-run help |
+| `src/ui/mainMenu.ts`                     | Main menu over attract-mode footage (Continue / New Journey / Settings)                                |
+| `src/ui/transition.ts`                   | The mode fade — the full-screen cover every `startGame`/`quitToMenu` runs behind                       |
+| `src/ui/confirm.ts`                      | `armConfirm` — two-step arm-and-confirm for destructive buttons                                        |
+| `src/ui/ui.css`                          | All UI styles (imported by `ui.ts`); builds on the glass CSS variables in `src/style.css`              |
+| `src/ui/hud.ts`                          | Corner HUD + the requestAnimationFrame update loop                                                     |
+| `src/ui/panels.ts`                       | `PanelManager` — one center glass card at a time, open/close/refresh lifecycle                         |
+| `src/ui/panelGarage.ts` … `panelHelp.ts` | One module per panel (garage, upgrades, trophies, prestige, settings, help)                            |
+| `src/ui/panelWhatsNew.ts`                | What's New panel (patch notes) + the unseen-release flag the menu's dot reads                          |
+| `src/ui/effects.ts`                      | Toasts, biome banner, offline-summary modal, prestige flash                                            |
+| `src/ui/dom.ts`                          | DOM helpers (`el`, change-detecting `textUpdater`/`classToggler`, `replayAnimation`)                   |
+| `src/ui/buildBadge.ts`                   | `createBuildBadge` — the shared version badge used by the menu corner and the settings panel           |
+| `src/ui/icons.ts`                        | Emoji maps for currencies, time-of-day, weather                                                        |
 
 ## App modes
 
@@ -87,12 +89,13 @@ displayed string/class actually changes.
 
 ## Keyboard
 
-| Key | Action |
-|-----|--------|
-| G / U / T / P / H | Toggle garage / upgrades / trophies / prestige / help (**gameplay only**) |
-| ↑ / ↓ | Move between the main menu's buttons (menu only) |
-| Esc | Close the open panel, or open Settings if none is open (ignored during a mode fade; dismisses the offline modal when it is up) |
-| M | Toggle audio (`actions.setAudioEnabled`) + confirmation toast |
+| Key               | Action                                                                                                                         |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| G / U / T / P / H | Toggle garage / upgrades / trophies / prestige / help (**gameplay only**)                                                      |
+| ↑ / ↓             | Move between the main menu's buttons (menu only)                                                                               |
+| Esc               | Close the open panel, or open Settings if none is open (ignored during a mode fade; dismisses the offline modal when it is up) |
+| N                 | Toggle What's New (**both modes** — the patch notes describe the build, not the journey)                                       |
+| M                 | Toggle audio (`actions.setAudioEnabled`) + confirmation toast                                                                  |
 
 Keys are ignored while an `input`/`textarea`/contenteditable has focus (save
 import box), and when Ctrl/Cmd/Alt are held. Pressing an open panel's key closes
@@ -130,6 +133,28 @@ slab.
    arms and confirms through `armConfirm` (same 3 s window and danger styling as
    Reset save); with nothing to lose it starts on a single click.
 3. **Settings** — opens the existing panel over the menu.
+
+Two pieces of corner furniture sit outside the column:
+
+- **What's New** (top-right) — a pill on `--glass-bg-strong`, opening the patch
+  notes through the `openWhatsNew` callback (same guarded hand-off as Settings:
+  it stands down while `transition.busy`). It is **not** part of the Up/Down
+  cycle — `buttons` in `mainMenu.ts` is only the three slabs — but Tab reaches
+  it and Enter/Space activate it natively. A small accent dot appears when
+  `hasUnseenRelease()` (localStorage `everroad-seen-version` ≠ `APP_VERSION`, a
+  key disjoint from the save system's `everroad-save-v1`); it clears on the
+  click, and nothing is communicated by the dot alone.
+- **The build badge** (bottom-right) — `buildLabel()` from `src/version/`,
+  `v0.1.17 · web · a1b2c3d`, in the menu's own dim ink with a text shadow.
+  Selectable (`user-select: text`, against the `body` default) and carrying a
+  `title`/`aria-label` that spells out version, runtime and commit, because its
+  whole job is to be pasted into a bug report. Under 640px it flows into the
+  bottom sheet instead of sitting fixed over the footer.
+
+Both are children of `.menu-inner`, not of the menu layer, so the `inert`
+attribute set on that element while a panel is open takes them out of the tab
+order with the slabs. A corner button appended to the layer instead would stay
+keyboard-live behind an open card — the same defect §"App modes" describes.
 
 Up/Down cycle the enabled buttons (Tab also works, Enter/Space activate
 natively); focus lands on the primary button on mount, delayed at boot so it
@@ -192,28 +217,56 @@ position.
    (these mutate `state.settings.musicVolume` / `sfxVolume` directly — UIActions
    has no volume setters; the audio engine reads settings live), quality select
    (`setQuality`), Show FPS checkbox (mutates `settings.showFps`). **Session**
-   section (gameplay only — hidden while `runtime.appMode === 'menu'`): **Quit
-   to Main Menu**, "Saves your journey first.", which closes the panel and calls
-   `actions.quitToMenu()` through the mode fade. A browser tab cannot close
-   itself, so quitting means returning to the menu and the copy says so. Save
+   section (present in both app modes in the desktop build; gameplay only in the
+   web build, where its single row is hidden while `runtime.appMode === 'menu'`):
+   **Quit to Main Menu**, "Saves your journey first.", which closes the panel and calls
+   `actions.quitToMenu()` through the mode fade. In the web build that is the
+   only quit there is — a tab cannot close itself — and the copy says so. In the
+   desktop build (`isDesktop()`) a second row, **Quit to Desktop**, sits below
+   it and is shown **in both app modes**, since closing the app from the title
+   screen is the ordinary case; in gameplay it goes out through
+   `actions.quitToMenu()` (the save path UIActions exposes — there is no bare
+   `save()`) and then calls `desktop()!.quit()`. It is a plain button, not
+   `armConfirm`: it destroys nothing. The panel's last line is the same build
+   badge the menu carries, after the danger zone. Both badges come from
+   `createBuildBadge` in `src/ui/buildBadge.ts`: the terse `v0.1.17 · web · sha`
+   line is `aria-hidden` and the spoken form ("Everroad 0.1.17, web build,
+   commit sha") rides along as `.sr-only` text inside the element. It is not an
+   `aria-label` — a plain container maps to the ARIA `generic` role, which
+   prohibits naming, so the label would be discarded and the dotted string read
+   out instead. `.sr-only` sets `user-select: none`, so selecting the badge for
+   a bug report still copies only the terse line. Save
    section: Export (`exportSave` → read-only textarea + clipboard copy), Import
    (textarea → `importSave`, inline error on failure), Reset (`resetSave`,
    double-confirm within 3 s).
 6. **Help (H)** — controls table + one-paragraph how-it-works. Auto-opens once
    for a brand-new save (`stats.playTimeSec < 5`) on the **first transition into
    `playing`**, not on top of the main menu.
+7. **What's New (N)** — the patch notes, from the generated `CHANGELOG` in
+   `src/version/changelog.generated.ts` (produced from CHANGELOG.md by `npm run
+changelog`; the panel knows nothing about the parsing). One disclosure per
+   release, newest first and expanded, the rest collapsed and opening on click.
+   Each header carries the version and date; inside, `Added`/`Changed`/`Fixed`
+   are `.section-label` groups of bullets, with `**bold**` rendered as
+   `<strong>` by building text nodes — never `innerHTML` — and every other
+   Markdown character left literal. An empty `CHANGELOG` renders one line rather
+   than a blank card. The disclosures are `<button aria-expanded>` pairs rather
+   than `<details>`/`<summary>`: `FOCUSABLE` in `panels.ts` matches buttons and
+   explicit tabindex, and a bare `<summary>` would be a tab stop the focus trap
+   cannot see. Collapsed bodies take `.hidden` (`display: none`), which is also
+   what keeps them out of that trap.
 
 ## Bus events consumed
 
-| Event | Response |
-|-------|----------|
-| `achievement` | Glassy toast per unlock (icon, "Achievement unlocked!", name, reward); trophies grid patched in place † |
-| `toast` | Generic small toast † |
-| `pickup` (kind `relic`) | "Relic found! 🍁" toast † |
-| `offlineSummary` | Welcome-back modal: `⏱ formatDuration(seconds) → 🪙 +coins` |
-| `prestige` | Full-screen soft radial flash + "New Journey begins — +N 🌅" toast † |
-| `biomeChange` | Zelda-style area-title banner, fades in/out over ~2.6 s † |
-| `purchase`, `carSelected` | Re-render the open panel |
+| Event                     | Response                                                                                                |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- |
+| `achievement`             | Glassy toast per unlock (icon, "Achievement unlocked!", name, reward); trophies grid patched in place † |
+| `toast`                   | Generic small toast †                                                                                   |
+| `pickup` (kind `relic`)   | "Relic found! 🍁" toast †                                                                               |
+| `offlineSummary`          | Welcome-back modal: `⏱ formatDuration(seconds) → 🪙 +coins`                                             |
+| `prestige`                | Full-screen soft radial flash + "New Journey begins — +N 🌅" toast †                                    |
+| `biomeChange`             | Zelda-style area-title banner, fades in/out over ~2.6 s †                                               |
+| `purchase`, `carSelected` | Re-render the open panel                                                                                |
 
 † Dropped unless `runtime.appMode === 'playing'`. Attract mode runs the real
 world, so these events keep firing behind the title screen.
@@ -234,6 +287,10 @@ Toasts stack top-center, max 3 visible (extras queue), auto-dismiss after
   `.hud` is a lighter variant for corners.
 - Utility classes: `.hidden`, `.mono`, `.btn`(+`-accent`/`-ghost`/`-danger`/`-big`),
   `.chip`, `.pill`, `.key-hint`, `.progress-track`/`.progress-fill`.
+- The corner furniture (`.menu-corner-btn`, `.menu-build`) is `position: fixed`
+  so it can reach the frame's corners from inside `.menu-inner`, which is only
+  the left-hand column. `.menu-inner`'s opacity recede makes a stacking context,
+  not a containing block, so the fixed positions stay relative to the viewport.
 - The main menu lives in `ui.css`; the `.mode-cover` lives in `style.css`
   alongside `#loading-screen`, since both are full-screen shell layers outside
   `#ui-root`.

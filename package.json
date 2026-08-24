@@ -1,9 +1,12 @@
 {
   "name": "everroad",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.17",
   "type": "module",
-  "description": "Everroad \u2014 an idle infinite driving game. Drive through a painted countryside forever.",
+  "main": "electron/main.cjs",
+  "author": "Troll-Phace (https://github.com/Troll-Phace)",
+  "homepage": "https://github.com/Troll-Phace/everroad",
+  "description": "Everroad — an idle infinite driving game. Drive through a painted countryside forever.",
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
@@ -11,14 +14,19 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "verify": "tsc --noEmit && vitest run && node scripts/build-models.mjs --check && vite build && node scripts/check-bundle-size.mjs",
+    "verify": "tsc --noEmit && vitest run && node scripts/build-models.mjs --check && node scripts/build-changelog.mjs --check && vite build && node scripts/check-bundle-size.mjs",
     "format": "prettier --write",
-    "format:check": "prettier --check \"src/**/*.{ts,css}\" \"scripts/**/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.{ts,css}\" \"scripts/**/*.mjs\" \"electron/**/*.cjs\"",
     "size": "node scripts/check-bundle-size.mjs",
     "models": "node scripts/build-models.mjs",
     "models:check": "node scripts/build-models.mjs --check",
     "models:blender": "\"${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}\" --background --python tools/blender/build_models.py --",
-    "models:smoke": "\"${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}\" --background --python tools/blender/smoke_test.py"
+    "models:smoke": "\"${BLENDER:-/Applications/Blender.app/Contents/MacOS/Blender}\" --background --python tools/blender/smoke_test.py",
+    "changelog": "node scripts/build-changelog.mjs",
+    "changelog:check": "node scripts/build-changelog.mjs --check",
+    "electron": "electron .",
+    "electron:dir": "npm run build && electron-builder --dir",
+    "electron:build": "npm run build && electron-builder --publish never"
   },
   "dependencies": {
     "postprocessing": "^6.36.4",
@@ -26,6 +34,8 @@
   },
   "devDependencies": {
     "@types/three": "^0.185.4",
+    "electron": "^43.4.1",
+    "electron-builder": "^26.15.3",
     "prettier": "^3.4.0",
     "typescript": "~5.7.0",
     "vite": "^6.0.0",
