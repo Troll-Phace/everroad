@@ -153,6 +153,7 @@ src/
     scenery.ts         Instanced trees/rocks/flowers/props per biome
     biomes.ts          Biome visual definitions + blend sampling
     sky.ts             Gradient sky dome, sun disc, stars, aurora
+    sunShadow.ts       Sun shadow rig: light placement, ortho box, night gate
     weather.ts         Weather state machine + particles
     car.ts             Procedural car mesh builder (from CarStyle)
     carPalette.ts      Fixed car tones shared by both car builders
@@ -400,6 +401,28 @@ height comes from `terrainHeight(path, s, lat)`, which blends the road's own
 elevation into the surrounding land so the highway sits in the terrain rather
 than on it.
 
+`terrainHeight` is the analytic height *field*; it is not the surface the
+player sees. The terrain mesh samples that field only at grid vertices — rows
+every 6 m, columns as far apart as 50 m out in the fields — and draws flat
+triangles between them, so on a slope or a hill crest the drawn surface
+departs from the field by a lot: measured across 38.5k points, a median of
+0.39 m and a p95 of 2.14 m. Anything that must *touch* the ground therefore has
+to sample the drawn surface, not the field. `sampleTerrainMesh(path, s, lat,
+out)` does that — it locates the cell, picks the triangle matching the
+`gridIndices` winding, and solves the barycentric in world XZ against the real
+corner positions, returning height and face normal. Solving in parametric
+(s, lat) space instead is *not* equivalent: the (s, lat) → XZ map is bilinear
+rather than affine across a cell, which is exact near the road but drifts to
+~28 cm past 120 m. Grounding scenery to the field instead of the mesh was the
+"floating trees" bug.
+
+The far field folds: the road's minimum radius of curvature is ~88 m while
+`TER_COLS` reaches ±165 m, so `1 - κ·lat` goes negative and the lateral mapping
+inverts on the tightest bends — around 0.7% of cells past |lat| 90 and 6% past
+150. `sampleTerrainMesh` flags those samples `folded` and callers decline to
+use the normal, because its slope direction is mirrored. The underlying
+crumpled geometry is a real defect in the terrain ribbon, tracked separately.
+
 Dash bleed at chunk seams and terrain winding after an axis flip have both been
 bugs here (commits `2a3856d`, `ebbdbe9`). New geometry work in this file should
 be checked at a seam, not mid-chunk.
@@ -442,6 +465,20 @@ night, and aurora ribbons that appear only during the aurora weather state. The
 sun disc is also the god-ray source for the post-processing stack, so its screen
 position and occlusion matter beyond its own appearance.
 
+**Shadows use a different sun** (`world/sunShadow.ts`). `SunSnapshot` drives the
+sky and the god rays, where a ~10 degree dawn/sunset elevation is the whole
+point; shadow length is `cot(elevation)`, so that same sun throws shadows 5.7x
+the caster's height. `SunShadow` therefore takes the snapshot's azimuth but
+clamps elevation up to a floor (~23 degrees), keeping shadows at or under ~2.4x
+the caster. It also owns the scene's single `DirectionalLight`: the ortho box
+(±60 m, 2048 map) is biased ahead of the car along its heading and snapped to
+the shadow map's texel grid so edges do not crawl as the car moves, the depth
+range is derived from the box rather than guessed, and `castShadow` is gated off
+below the horizon so nothing casts upward through the terrain at night. Because
+one light has one direction, the clamp also raises the diffuse direction at
+golden hour — accepted, since a second shadow-casting light is outside the perf
+budget.
+
 ### 5.6 Weather (`weather.ts`)
 
 A state machine over `clear | rain | fog | leaves | aurora` with `FADE_SEC = 8`
@@ -466,9 +503,24 @@ is seeded from `s` so a given stretch of road always regenerates identically.
 Painterly variation comes from `pickTint` on the baked vertex colors rather than
 from distinct materials.
 
+Props are grounded and oriented by `groundProp`, which samples the drawn
+terrain surface (§5.3) rather than the height field. Two tuning tables live
+with it. `SLOPE_FOLLOW` is how far each kind leans toward the face it stands
+on — 1.0 for things that lie on the ground (grass tufts, rocks), tapering to
+0.1–0.2 for trees and the windmill, which grew or were built vertical and only
+pick up a hint of the lean. `MAX_TILT = 0.5` rad (~29°) caps the lean; real
+land tops out near 26°, so the cap only bites in the folded far field. The sink
+is interpolated by the same follow value, `SINK_FLUSH = 0.03` m to
+`SINK_UPRIGHT = 0.14` m: a prop lying flush with the face needs a sliver to
+kill the seam, while one kept deliberately vertical on a slope must bury its
+base deep enough that the downhill edge does not lift off. One number for both
+floats tree trunks or swallows grass.
+
 Adding a scenery kind means: a new `SceneryKind` member, a `getProto` case, a
-weight in the relevant `BiomeVisual` entries, and — if it should count for
-near-misses — registration as an `Obstacle` in `chunks.ts`.
+weight in the relevant `BiomeVisual` entries, a `SLOPE_FOLLOW` lean value (the
+table is exhaustive over `SceneryKind`, so this one is a compile error rather
+than a silent default), and — if it should count for near-misses —
+registration as an `Obstacle` in `chunks.ts`.
 
 ### 5.8 Materials and post-processing (`materials.ts`, `postfx.ts`)
 
