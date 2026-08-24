@@ -16,7 +16,7 @@ Entry point: `src/audio/audio.ts` → `createAudioEngine(): AudioEngine`
 | `palettes.ts` | Per-biome key/mode data: root note, melody scale, chord progression, brightness |
 | `music.ts` | Pad chords, phase (time-of-day) shaping, wind-chime melody + feedback delay |
 | `engineSound.ts` | Engine rumble bed (noise-only) + drift tire layer |
-| `nature.ts` | Wind, birds, crickets, rain bed + thunder rumbles, aurora shimmer |
+| `nature.ts` | Wind, birds, crickets, rain bed + thunder rumbles |
 | `sfx.ts` | One-shots: coin/relic pickups, achievement, purchase, near-miss, prestige |
 | `helpers.ts` | Noise buffer generation, `rampTo` (click-free param ramps), midi→Hz, RNG |
 
@@ -30,7 +30,6 @@ MUSIC BUS (setMusicVolume)
                overlapping = seamless crossfade)                                                   │
   chimes: sine pluck ─▶ chimeBus ─┬─ dry ──────────────────────────────────────────────────────────┤
                                   └─ delay(0.42s) ⇄ LP(2.4k)·fb(0.34) ─ wet ───────────────────────┤
-  aurora shimmer: 2 detuned high sines + chorus LFO ─▶ shimmerGain ────────────────────────────────┤
                                                                                                    ▼
                                                                                               musicBus
 SFX BUS (setSfxVolume)                                                                             │
@@ -49,7 +48,7 @@ SFX BUS (setSfxVolume)                                                          
 ```
 
 Routing rationale: the **music bus** carries everything tonal-and-ambient
-(pads, chimes, aurora shimmer — it's pitched, so it lives with the music).
+(pads and chimes — they're pitched, so they live with the music).
 The **sfx bus** carries the car, the weather/nature noise beds, and all
 one-shots — turning "SFX" down quiets the world; turning "Music" down leaves
 just the drive.
@@ -118,9 +117,14 @@ noise-based. Drifting fades in a bandpassed white-noise "shhh" at 1.7 kHz
   sine pitch-envelope notes (2.4–3.8 kHz, up-then-down glides).
 - **Crickets** — night: every 0.6–1.8 s a burst of 4–6 short 4.1 kHz sine
   ticks 65 ms apart.
-- **Aurora shimmer** — two high sines at the palette's root+fifth three
-  octaves up, detuned ±6–7 cents with a 0.31 Hz chorus LFO on detune, faded
-  in over ~4 s. Routed to the music bus so it always agrees with the key.
+Aurora weather has **no audio layer**. It used to: two sines at the palette's
+root + fifth three octaves up, detuned and swirled by a chorus LFO. Being
+consonant with the key did not save it — on the brighter biomes it landed at
+1319 Hz and 1976 Hz, bare sines sounding continuously in the band the ear is
+most sensitive to, with no harmonic content and no envelope. Players heard a
+high-pitched whine and took it for engine noise. Removed; aurora is visual
+only. Anything tonal added back for it needs a lower register, a real
+envelope, and a timbre with harmonics.
 
 ### 4. One-shots (`sfx.ts`)
 

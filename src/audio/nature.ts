@@ -1,7 +1,15 @@
 /**
  * Nature ambience: wind swells (always present), birds by day, crickets by
- * night, a rain bed with occasional distant rumbles, and an ethereal shimmer
- * pad during aurora weather.
+ * night, and a rain bed with occasional distant rumbles.
+ *
+ * Aurora weather used to add a tonal "shimmer" pad here: two bare detuned
+ * sines at the palette root + fifth, three octaves up, sounding continuously
+ * with a slow chorus LFO. On the brighter biomes that put them at 1319 Hz and
+ * 1976 Hz -- the band the ear is most sensitive to, with no harmonic content
+ * to soften it and no envelope to break it up. It read as a high-pitched
+ * whine, and it was removed. Aurora is now a purely visual event. If a tonal
+ * aurora cue is ever wanted again, it needs a lower register, a real
+ * envelope, and something other than naked sines.
  *
  * Everything event-like (birds, crickets, rumbles) is scheduled off the audio
  * clock inside update() — no timers, no setInterval.
@@ -23,11 +31,7 @@ export function createNatureLayer(
   ctx: BaseAudioContext,
   /** Bus for noise-based ambience and critters (sfx bus). */
   out: AudioNode,
-  /** Bus for the tonal aurora shimmer (music bus, so it stays in the mix's key). */
-  tonalOut: AudioNode,
   buffers: { white: AudioBuffer; pink: AudioBuffer; brown: AudioBuffer },
-  /** Two consonant high frequencies (root + fifth) for the aurora shimmer. */
-  getShimmerFreqs: () => [number, number],
 ): NatureLayer {
   // --- wind: pink noise through a wandering bandpass, slow swell LFO -------
   const wind = loopingNoise(ctx, buffers.pink, out);
@@ -72,36 +76,6 @@ export function createNatureLayer(
   const critters = ctx.createGain();
   critters.gain.value = 1;
   critters.connect(out);
-
-  // --- aurora shimmer: detuned high sine pair, chorus-y LFO, tonal bus -----
-  const shimmerGain = ctx.createGain();
-  shimmerGain.gain.value = 0;
-  shimmerGain.connect(tonalOut);
-  const shimA = ctx.createOscillator();
-  const shimB = ctx.createOscillator();
-  shimA.type = 'sine';
-  shimB.type = 'sine';
-  shimA.detune.value = -6;
-  shimB.detune.value = 7;
-  const shimLfo = ctx.createOscillator();
-  shimLfo.type = 'sine';
-  shimLfo.frequency.value = 0.31;
-  const shimLfoDepth = ctx.createGain();
-  shimLfoDepth.gain.value = 9; // cents — slow chorus swirl
-  shimLfo.connect(shimLfoDepth);
-  shimLfoDepth.connect(shimA.detune);
-  shimLfoDepth.connect(shimB.detune);
-  const shimAGain = ctx.createGain();
-  const shimBGain = ctx.createGain();
-  shimAGain.gain.value = 0.6;
-  shimBGain.gain.value = 0.45;
-  shimA.connect(shimAGain);
-  shimB.connect(shimBGain);
-  shimAGain.connect(shimmerGain);
-  shimBGain.connect(shimmerGain);
-  shimA.start();
-  shimB.start();
-  shimLfo.start();
 
   // --- event scheduling ----------------------------------------------------
   let lastWeather: WeatherId | null = null;
@@ -196,13 +170,6 @@ export function createNatureLayer(
         // Leaves/petals: slightly stronger wind swells.
         rampTo(wind.gain.gain, breezy ? 0.03 : 0.016, 3, now);
         rampTo(swellDepth.gain, breezy ? 0.017 : 0.009, 3, now);
-        const aurora = mood.weatherId === 'aurora';
-        if (aurora) {
-          const [fa, fb] = getShimmerFreqs();
-          shimA.frequency.setTargetAtTime(fa, now, 0.5);
-          shimB.frequency.setTargetAtTime(fb, now, 0.5);
-        }
-        rampTo(shimmerGain.gain, aurora ? 0.022 : 0, 4, now);
         if (rainy) nextRumble = now + rand(8, 20);
       }
       if (mood.timePhase !== lastPhase) {

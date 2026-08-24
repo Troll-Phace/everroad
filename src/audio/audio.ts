@@ -97,12 +97,6 @@ export function createAudioEngine(): AudioEngine {
     rampTo(sfxBus.gain, volCurve(sfxVol), 0.15, now);
   }
 
-  function shimmerFreqs(): [number, number] {
-    // Root + fifth, three octaves up — consonant with every chord in the key.
-    const root = PALETTES[curBiome].root;
-    return [midiToFreq(root + 36), midiToFreq(root + 43)];
-  }
-
   function build(): void {
     const AC: typeof AudioContext | undefined =
       typeof window !== 'undefined'
@@ -143,7 +137,7 @@ export function createAudioEngine(): AudioEngine {
     music = createMusicLayer(ctx, musicBus, PALETTES[curBiome]);
     lastAppliedBiome = curBiome;
     engine = createEngineLayer(ctx, sfxBus, buffers);
-    nature = createNatureLayer(ctx, sfxBus, musicBus, buffers, shimmerFreqs);
+    nature = createNatureLayer(ctx, sfxBus, buffers);
     sfx = createSfx(ctx, sfxBus, buffers.white);
 
     if (enabled) {
