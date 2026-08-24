@@ -129,7 +129,7 @@ All pitched one-shots receive frequencies from the *current biome's scale*
 
 | Event | Sound |
 |-------|-------|
-| `onPickup('coin')` | Marimba-ish pluck: sine + faint 4× partial, ~0.3 s decay, random scale note (octave 5–6), ±3-cent humanization |
+| `onPickup('coin')` | Marimba-ish pluck: sine + faint 4× partial, ~0.3 s decay, ±3-cent humanization. Pitches form a **coin run**: consecutive coins walk up then down a scale (major, natural minor, or lydian — picked at random per run) rooted at the current biome key; a >2.5 s lull starts a fresh run |
 | `onPickup('relic')` | 3-note upward scale arpeggio (degrees d, d+2, d+4) into the echo send, capped with a high-octave sparkle |
 | `onAchievement()` | Warm major arpeggio — root, just-intoned 3rd (5/4), 5th (3/2) — on the key's root, 0.9 s decays |
 | `onPurchase()` | Soft felt thump (sine 150→62 Hz) + one modest chime. Deliberately kaching-less |

@@ -33,11 +33,32 @@ const DISABLE_FADE_SEC = 0.5;
 /** Crossfade length when the biome (and therefore the palette) changes. */
 const BIOME_FADE_SEC = 5;
 
+/**
+ * Coin runs: consecutive pickups walk up and down a scale rooted at the
+ * current biome key. A new run (major, natural minor, or lydian — chosen at
+ * random) begins after a lull between coins.
+ */
+const RUN_SCALES: number[][] = [
+  [0, 2, 4, 5, 7, 9, 11], // major
+  [0, 2, 3, 5, 7, 8, 10], // natural minor
+  [0, 2, 4, 6, 7, 9, 11], // lydian
+];
+/** Scale degrees spanned before the run turns around (~2 octaves). */
+const RUN_SPAN = 13;
+/** Seconds of silence after which the next coin starts a fresh run. */
+const RUN_RESET_SEC = 2.5;
+
 export function createAudioEngine(): AudioEngine {
   // --- state that exists before/without a context --------------------------
   let ctx: AudioContext | null = null;
   let started = false;
   let failed = false;
+
+  // Coin-run melody walker state.
+  let runScale: number[] = RUN_SCALES[0];
+  let runPos = 0;
+  let runDir = 1;
+  let lastCoinTime = -Infinity;
   let enabled = true;
   let musicVol = 0.8;
   let sfxVol = 0.8;
@@ -234,7 +255,24 @@ export function createAudioEngine(): AudioEngine {
       try {
         const m = music!;
         if (kind === 'coin') {
-          sfx!.coin(m.randomScaleFreq(2 + ((Math.random() * 2) | 0)));
+          const now = ctx!.currentTime;
+          if (now - lastCoinTime > RUN_RESET_SEC) {
+            runScale = RUN_SCALES[(Math.random() * RUN_SCALES.length) | 0];
+            runPos = 0;
+            runDir = 1;
+          }
+          lastCoinTime = now;
+          const oct = Math.floor(runPos / runScale.length);
+          const semis = runScale[runPos % runScale.length];
+          sfx!.coin(midiToFreq(m.rootMidi() + semis + (2 + oct) * 12));
+          runPos += runDir;
+          if (runPos >= RUN_SPAN) {
+            runDir = -1;
+            runPos = RUN_SPAN - 2;
+          } else if (runPos < 0) {
+            runDir = 1;
+            runPos = 1;
+          }
         } else {
           // Ascending arpeggio: scale degrees d, d+2, d+4 two octaves up.
           const d = (Math.random() * 4) | 0;

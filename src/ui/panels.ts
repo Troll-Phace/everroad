@@ -62,7 +62,8 @@ export class PanelManager {
     const header = el('div', 'panel-header');
     const title = el('h2', 'panel-title', def.title);
     const hints = el('div', 'panel-hints');
-    hints.append(el('span', 'key-hint', def.key), el('span', 'key-hint', 'Esc'));
+    if (def.key !== 'Esc') hints.append(el('span', 'key-hint', def.key));
+    hints.append(el('span', 'key-hint', 'Esc'));
     header.append(title, hints);
     const content = el('div', 'panel-content');
     card.append(header, content);
