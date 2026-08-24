@@ -115,7 +115,11 @@ export function settingsPanel(deps: UIDeps, manager: PanelManager, effects: Effe
       importArea.rows = 3;
       importArea.spellcheck = false;
       importArea.placeholder = 'Paste a save code here…';
-      const importErr = el('div', 'settings-error hidden', 'That code could not be read.');
+      const importErr = el(
+        'div',
+        'settings-error hidden',
+        'That code could not be read — it may be damaged, or from a newer version of the game.',
+      );
       const importBtn = el('button', 'btn btn-ghost', 'Import save');
       importBtn.addEventListener('click', () => {
         const ok = actions.importSave(importArea.value.trim());

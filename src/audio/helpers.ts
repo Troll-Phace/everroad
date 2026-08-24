@@ -3,14 +3,21 @@
  * No imports from outside src/audio/ except '../types'.
  */
 
+/**
+ * Source of randomness for the audio helpers: any function returning a float
+ * in [0, 1). Defaults to Math.random so callers opt into determinism (a seeded
+ * generator in tests) rather than out of it.
+ */
+export type RandomFn = () => number;
+
 /** Random float in [a, b). */
-export function rand(a: number, b: number): number {
-  return a + Math.random() * (b - a);
+export function rand(a: number, b: number, random: RandomFn = Math.random): number {
+  return a + random() * (b - a);
 }
 
 /** Random element of a non-empty array. */
-export function pick<T>(arr: readonly T[]): T {
-  return arr[(Math.random() * arr.length) | 0];
+export function pick<T>(arr: readonly T[], random: RandomFn = Math.random): T {
+  return arr[(random() * arr.length) | 0];
 }
 
 export function clamp(v: number, lo: number, hi: number): number {
@@ -45,24 +52,31 @@ export function rampTo(param: AudioParam, target: number, sec: number, now: numb
 export type NoiseKind = 'white' | 'pink' | 'brown';
 
 /** Build a looping noise buffer (a couple seconds is plenty for a loop). */
-export function createNoiseBuffer(ctx: BaseAudioContext, kind: NoiseKind, seconds = 2): AudioBuffer {
+export function createNoiseBuffer(
+  ctx: BaseAudioContext,
+  kind: NoiseKind,
+  seconds = 2,
+  random: RandomFn = Math.random,
+): AudioBuffer {
   const len = Math.max(1, Math.floor(ctx.sampleRate * seconds));
   const buf = ctx.createBuffer(1, len, ctx.sampleRate);
   const d = buf.getChannelData(0);
   if (kind === 'white') {
-    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    for (let i = 0; i < len; i++) d[i] = random() * 2 - 1;
   } else if (kind === 'brown') {
     let last = 0;
     for (let i = 0; i < len; i++) {
-      const w = Math.random() * 2 - 1;
+      const w = random() * 2 - 1;
       last = (last + 0.02 * w) / 1.02;
       d[i] = last * 3.5;
     }
   } else {
     // Pink noise via Paul Kellet's economy filter.
-    let b0 = 0, b1 = 0, b2 = 0;
+    let b0 = 0,
+      b1 = 0,
+      b2 = 0;
     for (let i = 0; i < len; i++) {
-      const w = Math.random() * 2 - 1;
+      const w = random() * 2 - 1;
       b0 = 0.99765 * b0 + w * 0.099046;
       b1 = 0.963 * b1 + w * 0.2965164;
       b2 = 0.57 * b2 + w * 1.0526913;
@@ -76,7 +90,7 @@ export function createNoiseBuffer(ctx: BaseAudioContext, kind: NoiseKind, second
 export function loopingNoise(
   ctx: BaseAudioContext,
   buffer: AudioBuffer,
-  dest: AudioNode
+  dest: AudioNode,
 ): { src: AudioBufferSourceNode; filter: BiquadFilterNode; gain: GainNode } {
   const src = ctx.createBufferSource();
   src.buffer = buffer;

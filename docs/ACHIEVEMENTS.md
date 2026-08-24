@@ -198,7 +198,7 @@ Shown as ??? in-game until unlocked. Spoilers below.
 | 🔥 | **Ember Dance** | Hold a maximum combo while drifting through Emberwood at sunset. | 25,000 coins + 25 tokens | ✔ |
 | 🐢 | **Sunday Stroll** | Amble along at under 20 mph. No hurry at all. | 500 coins | ✔ |
 | 🚀 | **Redline** | Push past 150 mph. | 10,000 coins | ✔ |
-| 👻 | **Ghost Driver** | Reach 25 journey miles without ever touching the wheel. | 5,000 coins | ✔ |
+| 👻 | **Ghost Driver** | Reach 25 journey miles without touching the wheel once. | 5,000 coins | ✔ |
 | 💮 | **Petal Waltz** | Drift through a storm of petals in the Blossom Vale. | 2,500 coins | ✔ |
 | 🌄 | **Dawn Patrol** | Cruise the Dawnmarsh at dawn, when the mist glows gold. | 1,000 coins | ✔ |
 | 🔦 | **Into the Mist** | Drive the Mistpine Hills in fog, at night, headlights swallowed whole. | 2,500 coins | ✔ |

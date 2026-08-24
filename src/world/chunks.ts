@@ -80,6 +80,15 @@ export class ChunkManager {
     }
   }
 
+  /**
+   * True while chunk `index` is still generated. Once it is false the chunk's
+   * obstacles can never be yielded by obstaclesNear again, so anything keyed
+   * to them (near-miss dedupe) is safe to drop.
+   */
+  hasChunk(index: number): boolean {
+    return this.chunks.has(index);
+  }
+
   /** Obstacles within `range` meters of path distance s. */
   *obstaclesNear(s: number, range: number): Generator<Obstacle> {
     const lo = Math.floor((s - range) / CHUNK_LEN);

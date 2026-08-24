@@ -32,8 +32,9 @@ situational      = sunset x1.15 | dawn x1.05 (phases)
 tick earnings    = milesDelta * coinRate/mile * (isActive ? combo : 1)
 
 offline fraction = 0.40 + 0.08 * longHaulLevel        (level 10 => 120%)
-idle coins/sec   = carSpeed/3600 * coinRate(neutral) * offline fraction
-                   (neutral = meadow / day / clear; this is the offline baseline)
+idle coins/sec   = carSpeed * 0.94/3600 * coinRate(neutral) * offline fraction
+                   (neutral = meadow / day / clear; this is the offline baseline.
+                    0.94 = AUTOPILOT_CRUISE_FRACTION, the hands-off cruise speed)
 
 pickup value     = ceil(2 sec of neutral cruising income * combo), min 1
 relic chance     = 0.008/mile * (1 + 0.15*chime) * (1 + 0.15*keenEye)
@@ -43,8 +44,9 @@ combo gain       = 0.25/sec + 0.03 * tiresLevel
 combo duration   = 5 s + 1 s * momentumLevel
 ```
 
-**Starter reference:** 42 mph = 0.01167 miles/sec -> **0.70 coins/sec live idle**
-(42/min). Offline baseline at long-haul 0: 0.28 coins/sec.
+**Starter reference:** 42 mph cruised hands-off at 0.94x = 39.5 mph =
+0.01097 miles/sec -> **0.658 coins/sec live idle** (39.5/min). Offline baseline
+at long-haul 0: 0.263 coins/sec.
 
 ## Car catalog (final numbers)
 

@@ -16,6 +16,11 @@ export interface CarRig {
   hoverPads: THREE.Mesh[];
   bodyType: CarBodyType;
   /**
+   * World-space wheel radius (body `wheelR` × the rig's uniform scale), so
+   * wheel spin can be matched to ground speed. 0 for wheelless hover cars.
+   */
+  wheelRadius: number;
+  /**
    * Materials created per-rig (NOT from the shared toonMat cache), disposed
    * with the rig by disposeCar. Currently the hover pad/glow basics.
    */
@@ -288,7 +293,14 @@ export function buildCar(style: CarStyle): CarRig {
   }
 
   g.scale.setScalar(style.scale);
-  return { group: g, wheels, hoverPads, bodyType: style.bodyType, ownedMaterials };
+  return {
+    group: g,
+    wheels,
+    hoverPads,
+    bodyType: style.bodyType,
+    wheelRadius: p.wheelR * style.scale,
+    ownedMaterials,
+  };
 }
 
 /**
@@ -307,7 +319,8 @@ export function disposeCar(rig: CarRig): void {
 export function animateCar(rig: CarRig, speedMps: number, dt: number, time: number): void {
   for (const w of rig.wheels) {
     // Tire cylinder was rotated z=90°, so forward rolling is local Y.
-    w.rotation.y -= (speedMps * dt) / 0.36;
+    // Angular rate is ground speed over the rig's real wheel radius.
+    w.rotation.y -= (speedMps * dt) / rig.wheelRadius;
     (w.userData.wheelGroup as THREE.Group).children[1].rotation.y = w.rotation.y;
   }
   if (rig.hoverPads.length) {

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import type { EventBus } from '../types';
 import type { RoadPath } from './roadPath';
-import type { ChunkManager } from './chunks';
+import { CHUNK_LEN, type ChunkManager } from './chunks';
 import type { Vehicle } from './vehicle';
 import { toonMat } from './materials';
 
@@ -22,6 +22,10 @@ export interface PickupDeps {
 }
 
 const COIN_CAP = 160;
+/** Relic gem radius in meters — one shared geometry serves every spawn. */
+const RELIC_RADIUS = 0.5;
+/** Near-miss dedupe entries tolerated before dead chunks are pruned out. */
+const CONSUMED_PRUNE_AT = 400;
 
 interface Coin {
   s: number;
@@ -39,7 +43,16 @@ export class Pickups {
   private furthestSpawn = 120;
   private relic: { s: number; lateral: number; mesh: THREE.Mesh } | null = null;
   private relicMiles = 0;
-  private consumedObstacles = new Set<string>();
+  // At most one relic is live at a time, so a single geometry + material is
+  // shared across every spawn instead of allocating (and leaking) per spawn.
+  private relicGeo = new THREE.IcosahedronGeometry(RELIC_RADIUS, 0);
+  private relicMat = new THREE.MeshToonMaterial({
+    color: '#c9a0ff',
+    emissive: 0x7a3aff,
+    emissiveIntensity: 1,
+  });
+  /** Obstacle key -> owning chunk index, so dead chunks can be pruned. */
+  private consumedObstacles = new Map<string, number>();
   private time = 0;
 
   constructor(
@@ -136,7 +149,7 @@ export class Pickups {
       const r = this.relic;
       r.mesh.rotation.y += dt * 1.4;
       r.mesh.position.y += Math.sin(this.time * 2.6) * 0.003;
-      (r.mesh.material as THREE.MeshToonMaterial).emissiveIntensity = 0.9 + Math.sin(this.time * 4) * 0.35;
+      this.relicMat.emissiveIntensity = 0.9 + Math.sin(this.time * 4) * 0.35;
       if (r.s < carS - 30) {
         this.scene.remove(r.mesh);
         this.relic = null;
@@ -156,13 +169,24 @@ export class Pickups {
         if (Math.abs(ob.s - carS) > 1.6) continue;
         const gap = Math.abs(ob.lateral - carLat) - ob.radius;
         if (gap > -0.2 && gap < 1.9) {
-          this.consumedObstacles.add(ob.key);
+          this.consumedObstacles.set(ob.key, Math.floor(ob.s / CHUNK_LEN));
           this.gainCombo(0.4);
           this.deps.onNearMiss();
           this.bus.emit('nearMiss', { comboNow: this.combo });
         }
       }
-      if (this.consumedObstacles.size > 400) this.consumedObstacles.clear();
+      if (this.consumedObstacles.size > CONSUMED_PRUNE_AT) this.pruneConsumed();
+    }
+  }
+
+  /**
+   * Drop dedupe entries whose chunk has been recycled. Clearing wholesale
+   * would re-arm obstacles still inside the +/-1.6 m award window and let them
+   * pay out twice.
+   */
+  private pruneConsumed(): void {
+    for (const [key, chunkIndex] of this.consumedObstacles) {
+      if (!this.chunks.hasChunk(chunkIndex)) this.consumedObstacles.delete(key);
     }
   }
 
@@ -195,14 +219,28 @@ export class Pickups {
 
   private spawnRelic(s: number): void {
     const lateral = (Math.random() < 0.5 ? -1 : 1) * 5.6;
-    const mesh = new THREE.Mesh(
-      new THREE.IcosahedronGeometry(0.5, 0),
-      new THREE.MeshToonMaterial({ color: '#c9a0ff', emissive: 0x7a3aff, emissiveIntensity: 1 }),
-    );
+    const mesh = new THREE.Mesh(this.relicGeo, this.relicMat);
     const p = this.path.point(s, lateral);
     mesh.position.set(p.x, p.y + 1.1, p.z);
     this.scene.add(mesh);
     this.relic = { s, lateral, mesh };
+  }
+
+  /**
+   * Release the GPU resources this system owns. Materials from the shared
+   * `toonMat` cache (the coin material) are used elsewhere and are
+   * deliberately not disposed here, matching disposeCar in car.ts.
+   */
+  dispose(): void {
+    if (this.relic) {
+      this.scene.remove(this.relic.mesh);
+      this.relic = null;
+    }
+    this.scene.remove(this.coinMesh);
+    this.coinMesh.geometry.dispose();
+    this.coinMesh.dispose();
+    this.relicGeo.dispose();
+    this.relicMat.dispose();
   }
 
   shiftOrigin(dx: number, dz: number): void {

@@ -14,11 +14,11 @@ export class Input {
     window.addEventListener('keydown', (e) => {
       if (this.shouldIgnore(e)) return;
       this.keys.add(e.code);
-      if (this.isDriveKey(e.code)) {
-        this.sinceInput = 0;
-        // Don't let arrows scroll the page
-        if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
-      }
+      if (this.isDriveKey(e.code)) this.sinceInput = 0;
+      // Don't let arrows or space scroll the page. shouldIgnore() has already
+      // let through anything typed into a field or aimed at an open panel, so
+      // Space is only swallowed while the game surface owns the keyboard.
+      if (e.code.startsWith('Arrow') || e.code === 'Space') e.preventDefault();
     });
     window.addEventListener('keyup', (e) => {
       this.keys.delete(e.code);
@@ -29,6 +29,10 @@ export class Input {
   private shouldIgnore(e: KeyboardEvent): boolean {
     const t = e.target as HTMLElement | null;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA')) return true;
+    // A focused control owns its own keys. The offline-summary modal's button
+    // is not a panel (it never sets body.dataset.panel), so without this the
+    // Space preventDefault below would cancel its keyboard activation.
+    if (t && (t.tagName === 'BUTTON' || t.isContentEditable)) return true;
     if (document.body.dataset.panel) return true;
     return false;
   }

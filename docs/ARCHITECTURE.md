@@ -360,8 +360,12 @@ for any new code:
 
 `CHUNK_LEN = 60` m, with `AHEAD = 22` chunks generated ahead of the car (~1.3
 km) and `BEHIND = 3` retained, so roughly 25–28 chunks are alive at once. Each
-chunk owns a road strip, a terrain ribbon, and its instanced scenery. Chunks are
-recycled from behind to ahead with regenerated geometry rather than allocated.
+chunk owns a road strip, a terrain ribbon, and one merged scenery mesh. Chunks
+are allocated on entry and disposed on exit — `update` builds any chunk in
+`[cur - BEHIND, cur + AHEAD]` that is not in the map, then removes and
+`dispose()`s the geometries of every chunk outside it. There is no chunk pool;
+the geometry buffers are rebuilt per chunk. A perf regression here looks like a
+build spike at a chunk boundary, or geometries surviving the cull (see #5, #1).
 
 The road cross-section is a fixed column set (`ROAD_COLS`) running from dirt
 shoulder through asphalt to the cream center line, and the terrain ribbon spans
@@ -426,10 +430,15 @@ the most profitable, so noticing it is rewarded.
 
 ### 5.7 Scenery (`scenery.ts`)
 
-Every scenery kind is a `Proto` — a shared geometry and material built once —
-rendered through `InstancedMesh` per chunk. Placement is seeded from `s` so a
-given stretch of road always regenerates identically. Painterly variation comes
-from `jitterColor` on instance colors rather than from distinct materials.
+Every scenery kind is a `Proto` — shared vertex/normal/color arrays built once.
+Chunks do not instance these: `ChunkManager.buildScenery` CPU-bakes every
+placement into a single merged `BufferGeometry` per chunk, transforming the
+proto's vertices by the placement matrix and writing per-vertex colors. The
+whole chunk's scenery is therefore one `THREE.Mesh` sharing the chunk material,
+which keeps the draw call count flat at the cost of a per-chunk bake. Placement
+is seeded from `s` so a given stretch of road always regenerates identically.
+Painterly variation comes from `pickTint` on the baked vertex colors rather than
+from distinct materials.
 
 Adding a scenery kind means: a new `SceneryKind` member, a `getProto` case, a
 weight in the relevant `BiomeVisual` entries, and — if it should count for
@@ -787,7 +796,17 @@ Implementation: `src/save/save.ts`.
 - **Migration**: keyed off `state.version` against `SAVE_VERSION`. A migration
   fills fields that did not exist in the older shape; a missing field must
   resolve to its `defaultState()` value, never to `undefined` reaching the
-  economy.
+  economy. A migration that back-fills a *per-journey* counter seeds it from the
+  lifetime counter, not from zero, so an existing save is not handed progress it
+  never earned (`journeyActiveMiles` is the worked example).
+- **Forward versions**: a save whose `version` exceeds `SAVE_VERSION` is refused,
+  never downgraded — silently re-stamping it would drop fields this build does
+  not know about. `importSave` returns `null` (the same channel as a malformed
+  code, so the UI shows its inline error). `loadGame` returns `null` *and* copies
+  the raw string to `localStorage["everroad-save-v1-future"]` first, because the
+  5-second autosave would otherwise overwrite the newer save with a fresh
+  `defaultState()` within seconds. `clearSave()` deliberately leaves that backup
+  key in place.
 - **Offline**: `offlineSeconds(state, nowMs)` clamps the gap to
   `MAX_OFFLINE_SEC` (14 days). Coins are granted at the idle rate for that
   duration and reported through the `offlineSummary` event.

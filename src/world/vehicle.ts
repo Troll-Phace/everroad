@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import type { EventBus } from '../types';
+import { AUTOPILOT_CRUISE_FRACTION, type EventBus } from '../types';
 import type { Input } from '../engine/input';
 import { RoadPath, ROAD_HALF_WIDTH } from './roadPath';
 import { buildCar, animateCar, disposeCar, hoverBob, type CarRig } from './car';
@@ -79,11 +79,11 @@ export class Vehicle {
     // ---- speed ----
     // The car's stated speed is a hard ceiling. Autopilot cruises a touch
     // under it; holding W tops it out, S brakes down to ~40%.
-    let targetSpeed = cruise * 0.94;
+    let targetSpeed = cruise * AUTOPILOT_CRUISE_FRACTION;
     if (active) {
       const th = this.input.throttle;
       if (th > 0) targetSpeed = cruise;
-      else if (th < 0) targetSpeed = cruise * (0.94 + 0.54 * th);
+      else if (th < 0) targetSpeed = cruise * (AUTOPILOT_CRUISE_FRACTION + 0.54 * th);
     }
     if (Math.abs(this.lateral) > ROAD_HALF_WIDTH + 0.6) targetSpeed *= 0.82; // shoulder rumble
     targetSpeed = Math.min(targetSpeed, cruise);

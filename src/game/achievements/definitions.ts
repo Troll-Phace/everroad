@@ -1131,12 +1131,12 @@ const secret: AchievementDef[] = [
   {
     id: 'ghost-driver',
     name: 'Ghost Driver',
-    description: 'Reach 25 journey miles without ever touching the wheel.',
+    description: 'Reach 25 journey miles without touching the wheel once.',
     category: 'secret',
     icon: '👻',
     secret: true,
     reward: { coins: 5000 },
-    condition: (state) => state.stats.journeyMiles >= 25 && state.stats.activeMiles === 0,
+    condition: (state) => state.stats.journeyMiles >= 25 && state.stats.journeyActiveMiles === 0,
   },
   {
     id: 'petal-waltz',

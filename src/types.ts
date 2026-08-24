@@ -157,6 +157,8 @@ export interface GameStats {
   nearMisses: number;
   bestCombo: number;
   activeMiles: number;
+  /** Active (hands-on) miles this journey; resets on prestige. */
+  journeyActiveMiles: number;
   idleMiles: number;
   nightMiles: number;
   sunsetMiles: number;
@@ -387,6 +389,14 @@ export interface AudioEngine {
 // ---------------------------------------------------------------------------
 
 export const SAVE_VERSION = 1;
+
+/**
+ * Fraction of the car's stated top speed the autopilot cruises at when the
+ * player is not holding the throttle. Shared by the vehicle sim and the idle
+ * earning rate so projected offline income matches what hands-off play
+ * actually earns.
+ */
+export const AUTOPILOT_CRUISE_FRACTION = 0.94;
 
 /**
  * Format a number compactly: 1.2K, 3.4M, 5.6B ... Values past the last suffix

@@ -12,6 +12,7 @@ export function defaultStats(): GameStats {
     nearMisses: 0,
     bestCombo: 1,
     activeMiles: 0,
+    journeyActiveMiles: 0,
     idleMiles: 0,
     nightMiles: 0,
     sunsetMiles: 0,

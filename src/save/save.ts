@@ -2,6 +2,11 @@ import { SAVE_VERSION, type GameState } from '../types';
 import { defaultState, defaultStats } from '../state';
 
 const KEY = 'everroad-save-v1';
+/**
+ * Where a save written by a newer build is parked when this build refuses it,
+ * so the fresh-start autosave that follows cannot overwrite it (see loadGame).
+ */
+const FUTURE_KEY = 'everroad-save-v1-future';
 const EXPORT_PREFIX = 'EVR1.';
 /** Offline progress is honored up to 14 days. */
 export const MAX_OFFLINE_SEC = 14 * 24 * 3600;
@@ -15,6 +20,16 @@ export function saveGame(state: GameState): void {
   }
 }
 
+/**
+ * True when a parsed save was written by a build newer than this one. Such a
+ * save carries fields this version does not know about, and hydrating it would
+ * silently drop them and stamp the version down, so it is always refused.
+ */
+function isFutureSave(parsed: unknown): boolean {
+  const version = (parsed as Partial<GameState>).version;
+  return typeof version === 'number' && version > SAVE_VERSION;
+}
+
 /** Load and migrate a save, deep-merged over defaults so new fields appear. */
 export function loadGame(): GameState | null {
   try {
@@ -22,6 +37,18 @@ export function loadGame(): GameState | null {
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
+    if (isFutureSave(parsed)) {
+      // Fail safe rather than downgrade: the caller starts a fresh state and
+      // autosaves over KEY within seconds, so the newer save is copied aside
+      // first and can be recovered by running the newer build again.
+      console.warn('[save] stored save is from a newer build; starting fresh and backing it up');
+      try {
+        localStorage.setItem(FUTURE_KEY, raw);
+      } catch (err) {
+        console.warn('[save] could not back up the newer-build save', err);
+      }
+      return null;
+    }
     return hydrate(parsed as Partial<GameState>);
   } catch (err) {
     console.warn('[save] failed to load, starting fresh', err);
@@ -49,6 +76,10 @@ export function importSave(code: string): GameState | null {
     const json = new TextDecoder().decode(bytes);
     const parsed = JSON.parse(json);
     if (!parsed || typeof parsed !== 'object' || !('currencies' in parsed)) return null;
+    if (isFutureSave(parsed)) {
+      console.warn('[save] refused an import from a newer build');
+      return null;
+    }
     return hydrate(parsed as Partial<GameState>);
   } catch {
     return null;
@@ -58,6 +89,9 @@ export function importSave(code: string): GameState | null {
 /** Seconds the player has been away, clamped to the offline cap. */
 export function offlineSeconds(state: GameState, nowMs = Date.now()): number {
   const gap = (nowMs - state.lastSaveTime) / 1000;
+  // A hand-edited non-numeric lastSaveTime makes gap NaN, which both Math.max
+  // and Math.min pass straight through — so guard before clamping.
+  if (!Number.isFinite(gap)) return 0;
   return Math.min(Math.max(0, gap), MAX_OFFLINE_SEC);
 }
 
@@ -77,6 +111,12 @@ function hydrate(loaded: Partial<GameState>): GameState {
     achievements: Array.isArray(loaded.achievements) ? [...new Set(loaded.achievements)] : [],
     ownedCars: loaded.ownedCars?.length ? loaded.ownedCars : base.ownedCars,
   };
+  // A save from before journeyActiveMiles existed has no per-journey copy of
+  // the active miles; seed it from the lifetime counter so a veteran's save
+  // never reads as the hands-off journey it was not.
+  if (loaded.stats && loaded.stats.journeyActiveMiles === undefined) {
+    state.stats.journeyActiveMiles = state.stats.activeMiles;
+  }
   if (!state.ownedCars.includes(state.currentCarId)) {
     state.currentCarId = state.ownedCars[0];
   }

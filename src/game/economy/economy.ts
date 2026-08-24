@@ -9,12 +9,13 @@
  * docs/ECONOMY.md.
  */
 
-import type {
-  EconomyContext,
-  GameState,
-  PrestigePreview,
-  TickResult,
-  UpgradeKind,
+import {
+  AUTOPILOT_CRUISE_FRACTION,
+  type EconomyContext,
+  type GameState,
+  type PrestigePreview,
+  type TickResult,
+  type UpgradeKind,
 } from '../../types';
 import { CARS, STARTER_CAR_ID, getCarDef } from './cars';
 import {
@@ -215,7 +216,10 @@ export function getOfflineRateFraction(state: GameState): number {
  * cruising speed (miles/sec) x neutral coin rate x offline rate fraction.
  */
 export function getIdleCoinsPerSec(state: GameState): number {
-  const milesPerSec = getCarSpeed(state) / 3600;
+  // Hands-off play cruises at AUTOPILOT_CRUISE_FRACTION of the car's stated
+  // speed, so the idle baseline must too — otherwise offline projections run
+  // ahead of what the same time spent watching would have earned.
+  const milesPerSec = (getCarSpeed(state) * AUTOPILOT_CRUISE_FRACTION) / 3600;
   return milesPerSec * getCoinRatePerMile(state, NEUTRAL_CTX) * getOfflineRateFraction(state);
 }
 
@@ -228,11 +232,11 @@ export function getIdleCoinsPerSec(state: GameState): number {
  * Mutates state in place.
  */
 export function applyTick(state: GameState, ctx: EconomyContext): TickResult {
-  // A single NaN milesDelta or dtSec would poison coins/miles/playTime
+  // A single NaN milesDelta, dtSec, or combo would poison coins/miles/playTime
   // permanently (Math.max(0, NaN) is NaN), so non-finite inputs earn nothing.
   const miles = Number.isFinite(ctx.milesDelta) ? Math.max(0, ctx.milesDelta) : 0;
   const dtSec = Number.isFinite(ctx.dtSec) ? Math.max(0, ctx.dtSec) : 0;
-  const combo = ctx.isActive ? Math.max(1, ctx.combo) : 1;
+  const combo = ctx.isActive && Number.isFinite(ctx.combo) ? Math.max(1, ctx.combo) : 1;
   const coinsEarned = miles * getCoinRatePerMile(state, ctx) * combo;
 
   state.currencies.coins += coinsEarned;
@@ -243,8 +247,12 @@ export function applyTick(state: GameState, ctx: EconomyContext): TickResult {
   s.lifetimeCoins += coinsEarned;
   s.playTimeSec += dtSec;
 
-  if (ctx.isActive) s.activeMiles += miles;
-  else s.idleMiles += miles;
+  if (ctx.isActive) {
+    s.activeMiles += miles;
+    s.journeyActiveMiles += miles;
+  } else {
+    s.idleMiles += miles;
+  }
 
   switch (ctx.timePhase) {
     case 'night':
@@ -405,6 +413,7 @@ export function doPrestige(state: GameState): number {
   state.stats.prestigeCount += 1;
 
   state.stats.journeyMiles = 0;
+  state.stats.journeyActiveMiles = 0;
   state.currencies.coins = headStartCoins(globalLevel(state, 'head-start'));
   for (const carId of Object.keys(state.upgrades)) {
     state.upgrades[carId] = {};
