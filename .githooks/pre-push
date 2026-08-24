@@ -1,6 +1,8 @@
 #!/bin/sh
 # Everroad pre-push guard: run exactly what CI runs, locally, before any push.
 set -e
-echo "[pre-push] typecheck + build (mirrors CI)..."
-npm run build
+echo "[pre-push] format check..."
+npm run format:check
+echo "[pre-push] typecheck + tests + build + bundle budget (mirrors CI)..."
+npm run verify
 echo "[pre-push] OK — pushing."

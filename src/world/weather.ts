@@ -27,7 +27,10 @@ export class Weather {
   private leaves: THREE.InstancedMesh;
   private leafState: Array<{ x: number; y: number; z: number; phase: number; spin: number }> = [];
 
-  constructor(private scene: THREE.Scene, private bus: EventBus) {
+  constructor(
+    private scene: THREE.Scene,
+    private bus: EventBus,
+  ) {
     // ---- rain: points in a box around the camera ----
     const RAIN_N = 900;
     const rainPos = new Float32Array(RAIN_N * 3);
@@ -108,7 +111,8 @@ export class Weather {
     this.fade = Math.min(1, this.fade + dt / FADE_SEC);
     this.episodeLeft -= dt;
     // Aurora can't outlive the night.
-    if (this.current === 'aurora' && phase !== 'night') this.episodeLeft = Math.min(this.episodeLeft, 0);
+    if (this.current === 'aurora' && phase !== 'night')
+      this.episodeLeft = Math.min(this.episodeLeft, 0);
     if (this.episodeLeft <= 0) {
       const next = this.pick(biomeId, phase);
       if (next !== this.current) {

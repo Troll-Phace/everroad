@@ -132,14 +132,26 @@ export class Sky {
     scene.add(this.moon);
   }
 
-  update(camPos: THREE.Vector3, snap: SunSnapshot, pathS: number, aurora: number, dt: number): void {
+  update(
+    camPos: THREE.Vector3,
+    snap: SunSnapshot,
+    pathS: number,
+    aurora: number,
+    dt: number,
+  ): void {
     this.time += dt;
     const u = this.mat.uniforms;
     const { golden, nightness } = snap;
 
     // Continuous palette: day -> (golden) sunset -> (nightness) night.
-    this.zenithColor.copy(PAL.dayZenith).lerp(PAL.sunsetZenith, golden).lerp(PAL.nightZenith, nightness);
-    this.horizonColor.copy(PAL.dayHorizon).lerp(PAL.sunsetHorizon, golden).lerp(PAL.nightHorizon, nightness);
+    this.zenithColor
+      .copy(PAL.dayZenith)
+      .lerp(PAL.sunsetZenith, golden)
+      .lerp(PAL.nightZenith, nightness);
+    this.horizonColor
+      .copy(PAL.dayHorizon)
+      .lerp(PAL.sunsetHorizon, golden)
+      .lerp(PAL.nightHorizon, nightness);
     // Dawn leans pink instead of orange.
     if (snap.phase === 'dawn') this.horizonColor.lerp(PAL.dawnHorizonBias, 0.45 * golden);
     // Subtle biome tint on the horizon during daylight.

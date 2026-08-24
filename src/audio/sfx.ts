@@ -21,11 +21,7 @@ export interface SfxKit {
   prestige(rootFreq: number, cascadeFreqs: number[]): void;
 }
 
-export function createSfx(
-  ctx: BaseAudioContext,
-  out: AudioNode,
-  whiteNoise: AudioBuffer
-): SfxKit {
+export function createSfx(ctx: BaseAudioContext, out: AudioNode, whiteNoise: AudioBuffer): SfxKit {
   // Shared echo send (delay -> filtered feedback) for sparkly one-shots.
   const echoIn = ctx.createGain();
   echoIn.gain.value = 1;

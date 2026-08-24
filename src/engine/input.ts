@@ -39,8 +39,13 @@ export class Input {
 
   private isDriveKey(code: string): boolean {
     return (
-      code === 'KeyW' || code === 'KeyA' || code === 'KeyS' || code === 'KeyD' ||
-      code.startsWith('Arrow') || code === 'ShiftLeft' || code === 'ShiftRight'
+      code === 'KeyW' ||
+      code === 'KeyA' ||
+      code === 'KeyS' ||
+      code === 'KeyD' ||
+      code.startsWith('Arrow') ||
+      code === 'ShiftLeft' ||
+      code === 'ShiftRight'
     );
   }
 

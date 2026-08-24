@@ -160,7 +160,7 @@ export interface BiomeSample {
 /** Sample biome weights at path distance s (meters). */
 export function biomeAt(s: number): BiomeSample {
   const n = BIOME_ORDER.length;
-  const cycle = ((s / BIOME_LEN) % n + n) % n;
+  const cycle = (((s / BIOME_LEN) % n) + n) % n;
   const idx = Math.floor(cycle);
   const frac = cycle - idx; // 0..1 within current biome segment
   const cur = BIOME_ORDER[idx];

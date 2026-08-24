@@ -27,7 +27,7 @@ export function createNatureLayer(
   tonalOut: AudioNode,
   buffers: { white: AudioBuffer; pink: AudioBuffer; brown: AudioBuffer },
   /** Two consonant high frequencies (root + fifth) for the aurora shimmer. */
-  getShimmerFreqs: () => [number, number]
+  getShimmerFreqs: () => [number, number],
 ): NatureLayer {
   // --- wind: pink noise through a wandering bandpass, slow swell LFO -------
   const wind = loopingNoise(ctx, buffers.pink, out);

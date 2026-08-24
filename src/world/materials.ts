@@ -28,7 +28,10 @@ export function toonRamp(): THREE.DataTexture {
 const matCache = new Map<string, THREE.MeshToonMaterial>();
 
 /** Cached flat-color toon material. */
-export function toonMat(color: string | number, opts?: { emissive?: number }): THREE.MeshToonMaterial {
+export function toonMat(
+  color: string | number,
+  opts?: { emissive?: number },
+): THREE.MeshToonMaterial {
   const key = `${color}|${opts?.emissive ?? 0}`;
   let m = matCache.get(key);
   if (!m) {

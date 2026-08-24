@@ -206,10 +206,18 @@ export class Pickups {
       const t = i / (count - 1);
       coin.s = startS + i * 3.4;
       switch (kind) {
-        case 0: coin.lateral = baseLat; break; // straight line
-        case 1: coin.lateral = THREE.MathUtils.lerp(baseLat, targetLat, t); break; // sweep
-        case 2: coin.lateral = Math.sin(t * Math.PI * 2) * 3.2; break; // slalom
-        default: coin.lateral = baseLat + Math.sin(t * Math.PI) * 2.6; break; // arc
+        case 0:
+          coin.lateral = baseLat;
+          break; // straight line
+        case 1:
+          coin.lateral = THREE.MathUtils.lerp(baseLat, targetLat, t);
+          break; // sweep
+        case 2:
+          coin.lateral = Math.sin(t * Math.PI * 2) * 3.2;
+          break; // slalom
+        default:
+          coin.lateral = baseLat + Math.sin(t * Math.PI) * 2.6;
+          break; // arc
       }
       coin.lateral = THREE.MathUtils.clamp(coin.lateral, -4, 4);
       coin.active = true;
