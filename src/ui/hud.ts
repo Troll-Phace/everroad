@@ -60,7 +60,9 @@ export function initHUD(deps: UIDeps, root: HTMLElement): void {
   const odo = el('div', 'hud hud-bottom-right');
   const journey = el('div', 'odo-journey');
   const journeyVal = el('span', 'mono');
-  journey.append(journeyVal, el('span', 'odo-unit', ' mi'));
+  // "journey" = miles since the last prestige (only a New Journey resets it,
+  // never a reload) — label it so it doesn't look like a lifetime-miles clone.
+  journey.append(journeyVal, el('span', 'odo-unit', ' mi journey'));
   const lifetime = el('div', 'odo-lifetime');
   const trophies = el('div', 'odo-trophies');
   odo.append(journey, lifetime, trophies);
