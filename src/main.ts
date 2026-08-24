@@ -9,6 +9,7 @@ import { DayNight } from './engine/daynight';
 import { RoadPath } from './world/roadPath';
 import { ChunkManager } from './world/chunks';
 import { Sky } from './world/sky';
+import { FarLand } from './world/farLand';
 import { Vehicle } from './world/vehicle';
 import { ChaseCamera } from './world/camera';
 import { Weather } from './world/weather';
@@ -90,6 +91,8 @@ const daynight = new DayNight(runtime.timeOfDay);
 const path = new RoadPath(20260824);
 const chunks = new ChunkManager(path, scene);
 const sky = new Sky(scene);
+// Distant land past the terrain ribbon's lateral edge (docs/ARCHITECTURE.md §5.3).
+const farLand = new FarLand(scene);
 const weather = new Weather(scene, bus);
 const audio = createAudioEngine();
 
@@ -390,6 +393,7 @@ function frame(now: number): void {
   const camPos = chase.camera.position;
   chase.update(vehicle, dt);
   sky.update(camPos, snap, vehicle.s, weather.auroraStrength, dt);
+  farLand.update(camPos, vehicle.s);
   postfx.setGolden(snap.golden, snap.elevation > -0.05);
 
   // Fog: horizon color blended with biome fog tint; density from mist/weather.
@@ -481,6 +485,8 @@ if (import.meta.env.DEV) {
     weather,
     chunks,
     pickups,
+    scene,
+    camera: chase.camera,
   };
 }
 
