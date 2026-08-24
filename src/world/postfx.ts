@@ -9,6 +9,7 @@ import {
   SMAAEffect,
   HueSaturationEffect,
   KernelSize,
+  type Pass,
 } from 'postprocessing';
 import type { GameSettings } from '../types';
 
@@ -20,6 +21,8 @@ export class PostFX {
   private composer: EffectComposer;
   private godRays: GodRaysEffect | null = null;
   private quality: GameSettings['quality'] = 'high';
+  /** Passes currently in the composer, kept so quality rebuilds can dispose them. */
+  private passes: Pass[] = [];
 
   constructor(
     private renderer: THREE.WebGLRenderer,
@@ -33,26 +36,40 @@ export class PostFX {
     this.buildPasses();
   }
 
+  private addPass(pass: Pass): void {
+    this.composer.addPass(pass);
+    this.passes.push(pass);
+  }
+
   private buildPasses(): void {
+    // removeAllPasses() alone leaks the old passes' render targets and
+    // materials on every quality change — dispose the previous chain first.
     this.composer.removeAllPasses();
-    this.composer.addPass(new RenderPass(this.scene, this.camera));
+    for (const p of this.passes) p.dispose();
+    this.passes.length = 0;
+
+    this.addPass(new RenderPass(this.scene, this.camera));
 
     if (this.quality === 'low') {
       this.godRays = null;
-      this.composer.addPass(new EffectPass(this.camera, new VignetteEffect({ darkness: 0.42 })));
+      this.addPass(new EffectPass(this.camera, new VignetteEffect({ darkness: 0.42 })));
       return;
     }
 
-    this.godRays = new GodRaysEffect(this.camera, this.sun as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>, {
-      height: 360,
-      kernelSize: KernelSize.SMALL,
-      density: 0.96,
-      decay: 0.94,
-      weight: 0.5,
-      exposure: 0.55,
-      samples: this.quality === 'high' ? 60 : 36,
-      clampMax: 1.0,
-    });
+    this.godRays = new GodRaysEffect(
+      this.camera,
+      this.sun as THREE.Mesh<THREE.BufferGeometry, THREE.MeshBasicMaterial>,
+      {
+        height: 360,
+        kernelSize: KernelSize.SMALL,
+        density: 0.96,
+        decay: 0.94,
+        weight: 0.5,
+        exposure: 0.55,
+        samples: this.quality === 'high' ? 60 : 36,
+        clampMax: 1.0,
+      },
+    );
     const bloom = new BloomEffect({
       intensity: 0.75,
       luminanceThreshold: 0.72,
@@ -62,9 +79,11 @@ export class PostFX {
     const vignette = new VignetteEffect({ darkness: 0.42, offset: 0.28 });
     // Painterly punch: push saturation past realism.
     const sat = new HueSaturationEffect({ saturation: 0.22 });
-    const effects: Array<GodRaysEffect | BloomEffect | VignetteEffect | SMAAEffect | HueSaturationEffect> = [this.godRays, bloom, sat, vignette];
+    const effects: Array<
+      GodRaysEffect | BloomEffect | VignetteEffect | SMAAEffect | HueSaturationEffect
+    > = [this.godRays, bloom, sat, vignette];
     if (this.quality === 'high') effects.push(new SMAAEffect());
-    this.composer.addPass(new EffectPass(this.camera, ...effects));
+    this.addPass(new EffectPass(this.camera, ...effects));
   }
 
   setQuality(q: GameSettings['quality']): void {

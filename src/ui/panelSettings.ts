@@ -8,11 +8,11 @@
 import type { GameSettings, UIDeps } from '../types';
 import { el } from './dom';
 import type { Effects } from './effects';
-import type { PanelDef } from './panels';
+import type { PanelDef, PanelManager } from './panels';
 
 const CONFIRM_WINDOW_MS = 3000;
 
-export function settingsPanel(deps: UIDeps, effects: Effects): PanelDef {
+export function settingsPanel(deps: UIDeps, manager: PanelManager, effects: Effects): PanelDef {
   const { state, actions } = deps;
 
   function row(label: string, control: HTMLElement): HTMLElement {
@@ -123,6 +123,8 @@ export function settingsPanel(deps: UIDeps, effects: Effects): PanelDef {
         if (ok) {
           importArea.value = '';
           effects.toast({ icon: '💾', body: 'Save imported' });
+          // Controls above were built from the pre-import state; rebuild them.
+          manager.refresh();
         }
       });
       content.append(importArea, importBtn, importErr);
@@ -146,6 +148,8 @@ export function settingsPanel(deps: UIDeps, effects: Effects): PanelDef {
         }
         window.clearTimeout(armTimer);
         actions.resetSave();
+        // Re-render so the controls reflect the freshly reset settings.
+        manager.refresh();
       });
       content.append(resetBtn);
     },

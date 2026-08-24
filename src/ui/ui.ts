@@ -28,11 +28,11 @@ export function initUI(deps: UIDeps): void {
   initHUD(deps, root);
 
   const panels = new PanelManager(deps, root);
-  panels.register(garagePanel(deps, panels));
-  panels.register(upgradesPanel(deps, panels));
+  panels.register(garagePanel(deps));
+  panels.register(upgradesPanel(deps));
   panels.register(trophiesPanel(deps));
   panels.register(prestigePanel(deps, panels));
-  panels.register(settingsPanel(deps, effects));
+  panels.register(settingsPanel(deps, panels, effects));
   panels.register(helpPanel());
 
   // ---- keyboard -----------------------------------------------------------
@@ -45,6 +45,8 @@ export function initUI(deps: UIDeps): void {
   };
 
   window.addEventListener('keydown', (e) => {
+    // Held keys auto-repeat; only the initial press should toggle anything.
+    if (e.repeat) return;
     // Never swallow keys while the player is typing (save import etc.).
     const target = e.target as HTMLElement | null;
     if (

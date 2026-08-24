@@ -15,6 +15,11 @@ export interface CarRig {
   /** For hover cars: glow discs to bob/pulse. */
   hoverPads: THREE.Mesh[];
   bodyType: CarBodyType;
+  /**
+   * Materials created per-rig (NOT from the shared toonMat cache), disposed
+   * with the rig by disposeCar. Currently the hover pad/glow basics.
+   */
+  ownedMaterials: THREE.Material[];
 }
 
 interface BodyParams {
@@ -32,16 +37,121 @@ interface BodyParams {
 }
 
 const BODIES: Record<CarBodyType, BodyParams> = {
-  compact: { len: 3.3, wid: 1.75, chassisH: 0.62, chassisY: 0.3, cabinLen: 1.7, cabinH: 0.62, cabinOffset: -0.1, wheelR: 0.34, wheelInsetZ: 0.72 },
-  sedan: { len: 4.2, wid: 1.8, chassisH: 0.58, chassisY: 0.32, cabinLen: 2.0, cabinH: 0.56, cabinOffset: -0.15, wheelR: 0.35, wheelInsetZ: 0.85 },
-  wagon: { len: 4.4, wid: 1.82, chassisH: 0.6, chassisY: 0.32, cabinLen: 2.7, cabinH: 0.6, cabinOffset: -0.5, wheelR: 0.36, wheelInsetZ: 0.85 },
-  pickup: { len: 4.6, wid: 1.9, chassisH: 0.68, chassisY: 0.38, cabinLen: 1.5, cabinH: 0.62, cabinOffset: 0.5, wheelR: 0.42, wheelInsetZ: 0.9, bed: true },
-  van: { len: 4.5, wid: 1.9, chassisH: 1.0, chassisY: 0.34, cabinLen: 3.2, cabinH: 0.75, cabinOffset: -0.3, wheelR: 0.38, wheelInsetZ: 0.9 },
-  classic: { len: 4.3, wid: 1.78, chassisH: 0.6, chassisY: 0.36, cabinLen: 1.7, cabinH: 0.58, cabinOffset: -0.35, wheelR: 0.4, wheelInsetZ: 0.8, nose: 0.9 },
-  muscle: { len: 4.5, wid: 1.94, chassisH: 0.6, chassisY: 0.3, cabinLen: 1.9, cabinH: 0.5, cabinOffset: -0.3, wheelR: 0.4, wheelInsetZ: 0.85 },
-  sports: { len: 4.2, wid: 1.9, chassisH: 0.5, chassisY: 0.26, cabinLen: 1.7, cabinH: 0.45, cabinOffset: -0.25, wheelR: 0.36, wheelInsetZ: 0.8, nose: 1.0 },
-  super: { len: 4.4, wid: 1.98, chassisH: 0.44, chassisY: 0.24, cabinLen: 1.9, cabinH: 0.42, cabinOffset: -0.1, wheelR: 0.35, wheelInsetZ: 0.82, nose: 1.1 },
-  hover: { len: 4.2, wid: 1.9, chassisH: 0.5, chassisY: 0.55, cabinLen: 2.1, cabinH: 0.5, cabinOffset: 0, wheelR: 0, wheelInsetZ: 0.85, nose: 0.8 },
+  compact: {
+    len: 3.3,
+    wid: 1.75,
+    chassisH: 0.62,
+    chassisY: 0.3,
+    cabinLen: 1.7,
+    cabinH: 0.62,
+    cabinOffset: -0.1,
+    wheelR: 0.34,
+    wheelInsetZ: 0.72,
+  },
+  sedan: {
+    len: 4.2,
+    wid: 1.8,
+    chassisH: 0.58,
+    chassisY: 0.32,
+    cabinLen: 2.0,
+    cabinH: 0.56,
+    cabinOffset: -0.15,
+    wheelR: 0.35,
+    wheelInsetZ: 0.85,
+  },
+  wagon: {
+    len: 4.4,
+    wid: 1.82,
+    chassisH: 0.6,
+    chassisY: 0.32,
+    cabinLen: 2.7,
+    cabinH: 0.6,
+    cabinOffset: -0.5,
+    wheelR: 0.36,
+    wheelInsetZ: 0.85,
+  },
+  pickup: {
+    len: 4.6,
+    wid: 1.9,
+    chassisH: 0.68,
+    chassisY: 0.38,
+    cabinLen: 1.5,
+    cabinH: 0.62,
+    cabinOffset: 0.5,
+    wheelR: 0.42,
+    wheelInsetZ: 0.9,
+    bed: true,
+  },
+  van: {
+    len: 4.5,
+    wid: 1.9,
+    chassisH: 1.0,
+    chassisY: 0.34,
+    cabinLen: 3.2,
+    cabinH: 0.75,
+    cabinOffset: -0.3,
+    wheelR: 0.38,
+    wheelInsetZ: 0.9,
+  },
+  classic: {
+    len: 4.3,
+    wid: 1.78,
+    chassisH: 0.6,
+    chassisY: 0.36,
+    cabinLen: 1.7,
+    cabinH: 0.58,
+    cabinOffset: -0.35,
+    wheelR: 0.4,
+    wheelInsetZ: 0.8,
+    nose: 0.9,
+  },
+  muscle: {
+    len: 4.5,
+    wid: 1.94,
+    chassisH: 0.6,
+    chassisY: 0.3,
+    cabinLen: 1.9,
+    cabinH: 0.5,
+    cabinOffset: -0.3,
+    wheelR: 0.4,
+    wheelInsetZ: 0.85,
+  },
+  sports: {
+    len: 4.2,
+    wid: 1.9,
+    chassisH: 0.5,
+    chassisY: 0.26,
+    cabinLen: 1.7,
+    cabinH: 0.45,
+    cabinOffset: -0.25,
+    wheelR: 0.36,
+    wheelInsetZ: 0.8,
+    nose: 1.0,
+  },
+  super: {
+    len: 4.4,
+    wid: 1.98,
+    chassisH: 0.44,
+    chassisY: 0.24,
+    cabinLen: 1.9,
+    cabinH: 0.42,
+    cabinOffset: -0.1,
+    wheelR: 0.35,
+    wheelInsetZ: 0.82,
+    nose: 1.1,
+  },
+  hover: {
+    len: 4.2,
+    wid: 1.9,
+    chassisH: 0.5,
+    chassisY: 0.55,
+    cabinLen: 2.1,
+    cabinH: 0.5,
+    cabinOffset: 0,
+    wheelR: 0,
+    wheelInsetZ: 0.85,
+    nose: 0.8,
+  },
 };
 
 const GLASS = '#bfe8f0';
@@ -56,10 +166,7 @@ export function buildCar(style: CarStyle): CarRig {
   const glass = toonMat(GLASS);
 
   // Chassis
-  const chassis = new THREE.Mesh(
-    new RoundedBoxGeometry(p.wid, p.chassisH, p.len, 3, 0.14),
-    body,
-  );
+  const chassis = new THREE.Mesh(new RoundedBoxGeometry(p.wid, p.chassisH, p.len, 3, 0.14), body);
   chassis.position.y = p.chassisY + p.chassisH / 2;
   chassis.castShadow = true;
   g.add(chassis);
@@ -93,20 +200,14 @@ export function buildCar(style: CarStyle): CarRig {
 
   // Pickup bed walls
   if (p.bed) {
-    const bedWall = new THREE.Mesh(
-      new RoundedBoxGeometry(p.wid * 0.92, 0.32, 1.7, 2, 0.06),
-      body,
-    );
+    const bedWall = new THREE.Mesh(new RoundedBoxGeometry(p.wid * 0.92, 0.32, 1.7, 2, 0.06), body);
     bedWall.position.set(0, p.chassisY + p.chassisH + 0.1, -p.len / 2 + 1.0);
     g.add(bedWall);
   }
 
   // Accent stripe down the hood for muscle/sports/super
   if (style.bodyType === 'muscle' || style.bodyType === 'sports' || style.bodyType === 'super') {
-    const stripe = new THREE.Mesh(
-      new THREE.BoxGeometry(0.34, 0.03, p.len * 0.95),
-      accent,
-    );
+    const stripe = new THREE.Mesh(new THREE.BoxGeometry(0.34, 0.03, p.len * 0.95), accent);
     stripe.position.y = p.chassisY + p.chassisH + 0.02;
     g.add(stripe);
   }
@@ -126,6 +227,7 @@ export function buildCar(style: CarStyle): CarRig {
   // Wheels or hover pads
   const wheels: THREE.Mesh[] = [];
   const hoverPads: THREE.Mesh[] = [];
+  const ownedMaterials: THREE.Material[] = [];
   if (style.bodyType === 'hover') {
     const padMat = new THREE.MeshBasicMaterial({
       color: 0x7ae8ff,
@@ -133,27 +235,48 @@ export function buildCar(style: CarStyle): CarRig {
       opacity: 0.65,
       toneMapped: false,
     });
-    for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+    ownedMaterials.push(padMat);
+    for (const [sx, sz] of [
+      [-1, 1],
+      [1, 1],
+      [-1, -1],
+      [1, -1],
+    ]) {
       const pad = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.5, 0.08, 12), padMat);
       pad.position.set(sx * (p.wid / 2 - 0.35), 0.22, sz * (p.len / 2 - p.wheelInsetZ));
       g.add(pad);
       hoverPads.push(pad);
     }
-    const glow = new THREE.Mesh(
-      new THREE.BoxGeometry(p.wid * 0.8, 0.04, p.len * 0.7),
-      new THREE.MeshBasicMaterial({ color: 0x58d8ff, transparent: true, opacity: 0.4, toneMapped: false }),
-    );
+    const glowMat = new THREE.MeshBasicMaterial({
+      color: 0x58d8ff,
+      transparent: true,
+      opacity: 0.4,
+      toneMapped: false,
+    });
+    ownedMaterials.push(glowMat);
+    const glow = new THREE.Mesh(new THREE.BoxGeometry(p.wid * 0.8, 0.04, p.len * 0.7), glowMat);
     glow.position.y = 0.14;
     g.add(glow);
   } else {
     const tireMat = toonMat(TIRE);
     const hubMat = toonMat(HUB);
-    for (const [sx, sz] of [[-1, 1], [1, 1], [-1, -1], [1, -1]]) {
+    for (const [sx, sz] of [
+      [-1, 1],
+      [1, 1],
+      [-1, -1],
+      [1, -1],
+    ]) {
       const wheel = new THREE.Group();
-      const tire = new THREE.Mesh(new THREE.CylinderGeometry(p.wheelR, p.wheelR, 0.26, 12), tireMat);
+      const tire = new THREE.Mesh(
+        new THREE.CylinderGeometry(p.wheelR, p.wheelR, 0.26, 12),
+        tireMat,
+      );
       tire.rotation.z = Math.PI / 2;
       wheel.add(tire);
-      const hub = new THREE.Mesh(new THREE.CylinderGeometry(p.wheelR * 0.5, p.wheelR * 0.5, 0.28, 8), hubMat);
+      const hub = new THREE.Mesh(
+        new THREE.CylinderGeometry(p.wheelR * 0.5, p.wheelR * 0.5, 0.28, 8),
+        hubMat,
+      );
       hub.rotation.z = Math.PI / 2;
       wheel.add(hub);
       wheel.position.set(sx * (p.wid / 2 - 0.08), p.wheelR, sz * (p.len / 2 - p.wheelInsetZ));
@@ -165,7 +288,19 @@ export function buildCar(style: CarStyle): CarRig {
   }
 
   g.scale.setScalar(style.scale);
-  return { group: g, wheels, hoverPads, bodyType: style.bodyType };
+  return { group: g, wheels, hoverPads, bodyType: style.bodyType, ownedMaterials };
+}
+
+/**
+ * Dispose a rig built by buildCar: every per-mesh geometry plus the rig's
+ * own uncached materials. The toonMat-cached materials are shared across
+ * rigs and scenery, so they are deliberately NOT disposed here.
+ */
+export function disposeCar(rig: CarRig): void {
+  rig.group.traverse((obj) => {
+    if (obj instanceof THREE.Mesh) obj.geometry.dispose();
+  });
+  for (const m of rig.ownedMaterials) m.dispose();
 }
 
 /** Spin wheels & bob hover pads. Call each frame. */

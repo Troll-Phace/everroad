@@ -6,9 +6,8 @@ import { formatNumber } from '../types';
 import { el } from './dom';
 import { CURRENCY_ICONS } from './icons';
 import type { PanelDef } from './panels';
-import type { PanelManager } from './panels';
 
-export function garagePanel(deps: UIDeps, manager: PanelManager): PanelDef {
+export function garagePanel(deps: UIDeps): PanelDef {
   const { state, catalogs, actions } = deps;
 
   function canAfford(car: CarDef): boolean {
@@ -52,10 +51,8 @@ export function garagePanel(deps: UIDeps, manager: PanelManager): PanelDef {
       footer.append(el('span', 'car-status car-status-selected', 'Driving'));
     } else if (owned) {
       const btn = el('button', 'btn btn-ghost', 'Select');
-      btn.addEventListener('click', () => {
-        actions.selectCar(car.id);
-        manager.refresh();
-      });
+      // The 'carSelected' bus event already re-renders the open panel.
+      btn.addEventListener('click', () => actions.selectCar(car.id));
       footer.append(btn);
     } else {
       const buy = el('button', 'btn btn-accent');
@@ -64,9 +61,8 @@ export function garagePanel(deps: UIDeps, manager: PanelManager): PanelDef {
         el('span', 'mono', formatNumber(car.cost)),
         document.createTextNode(` ${CURRENCY_ICONS[car.costCurrency]}`),
       );
-      buy.addEventListener('click', () => {
-        if (actions.buyCar(car.id)) manager.refresh();
-      });
+      // A successful buy emits 'purchase', which re-renders the open panel.
+      buy.addEventListener('click', () => actions.buyCar(car.id));
       footer.append(buy);
       update = () => {
         const ok = canAfford(car);

@@ -14,12 +14,13 @@ import { ChaseCamera } from './world/camera';
 import { Weather } from './world/weather';
 import { Pickups } from './world/pickups';
 import { PostFX } from './world/postfx';
-import { BIOMES, biomeAt, blendColor } from './world/biomes';
+import { BIOMES, biomeAt, blendColor, blendNumber } from './world/biomes';
 import * as economy from './game/economy/economy';
 import { CARS, getCarDef } from './game/economy/cars';
 import { UPGRADES, GLOBAL_UPGRADES } from './game/economy/upgrades';
 import { ACHIEVEMENTS } from './game/achievements/definitions';
 import { checkAchievements } from './game/achievements/tracker';
+import { updateSlowDrive } from './game/achievements/slowDrive';
 import { createAudioEngine } from './audio/audio';
 import * as save from './save/save';
 import { initUI } from './ui/ui';
@@ -30,6 +31,8 @@ import { initUI } from './ui/ui';
 
 const bus = createEventBus();
 const state: GameState = save.loadGame() ?? defaultState();
+// defaultStats seeds sessionCount 0, so a fresh install lands on exactly 1
+// here (a returning save lands on 2+ and earns "Welcome Back").
 state.stats.sessionCount += 1;
 economy.initEconomy(state);
 const runtime = defaultRuntime();
@@ -141,6 +144,10 @@ function replaceState(next: GameState): void {
   Object.assign(state, next);
   economy.initEconomy(state);
   vehicle.setStyle(getCarDef(state.currentCarId).style);
+  // Imported/reset settings must reach the systems that otherwise only read
+  // them at boot or through their own UI actions.
+  postfx.setQuality(state.settings.quality);
+  audio.setEnabled(state.settings.audioEnabled);
 }
 
 const actions: UIActions = {
@@ -214,7 +221,12 @@ const actions: UIActions = {
 const uiDeps: UIDeps = {
   state,
   runtime,
-  catalogs: { cars: CARS, upgrades: UPGRADES, globalUpgrades: GLOBAL_UPGRADES, achievements: ACHIEVEMENTS },
+  catalogs: {
+    cars: CARS,
+    upgrades: UPGRADES,
+    globalUpgrades: GLOBAL_UPGRADES,
+    achievements: ACHIEVEMENTS,
+  },
   actions,
   bus,
 };
@@ -292,6 +304,26 @@ function frame(now: number): void {
   // ---- simulation ----
   input.update(dt);
   vehicle.update(dt);
+
+  // ---- floating origin ----
+  // Rebase immediately after the vehicle moves and before anything is placed
+  // for this frame, so no system ever renders one frame in mixed coordinates.
+  // Everything downstream (chunks, pickups, camera, sky, sun light, weather)
+  // re-derives its placement from the shifted path/positions this same frame.
+  {
+    const pos = vehicle.root.position;
+    if (Math.abs(pos.x) > 2048 || Math.abs(pos.z) > 2048) {
+      const dx = -Math.round(pos.x);
+      const dz = -Math.round(pos.z);
+      path.shiftOrigin(dx, dz);
+      vehicle.shiftOrigin(dx, dz);
+      chunks.shiftOrigin(dx, dz);
+      chase.shiftOrigin(dx, dz);
+      weather.shiftOrigin(dx, dz);
+      pickups.shiftOrigin(dx, dz);
+    }
+  }
+
   const snap = daynight.update(dt);
   runtime.timeOfDay = daynight.timeOfDay;
   if (snap.phase !== runtime.timePhase) {
@@ -304,6 +336,7 @@ function frame(now: number): void {
   pickups.update(dt, vehicle, milesDelta);
 
   runtime.speedMph = vehicle.speedMph;
+  updateSlowDrive(dt, runtime.speedMph, runtime.paused);
   runtime.isActive = vehicle.isActive;
   runtime.isDrifting = vehicle.isDrifting;
   runtime.combo = pickups.combo;
@@ -322,7 +355,14 @@ function frame(now: number): void {
     bus.emit('biomeChange', { id: biome.id, name: BIOME_NAMES[biome.id] });
   }
 
-  weather.update(dt, chase.camera.position, runtime.biomeId, runtime.timePhase, vehicle.speedMps, now / 1000);
+  weather.update(
+    dt,
+    chase.camera.position,
+    runtime.biomeId,
+    runtime.timePhase,
+    vehicle.speedMps,
+    now / 1000,
+  );
   if (weather.current !== runtime.weatherId) runtime.weatherId = weather.current;
 
   // ---- economy tick ----
@@ -336,7 +376,11 @@ function frame(now: number): void {
     weatherId: runtime.weatherId,
   };
   const tick = economy.applyTick(state, ctx);
-  runtime.coinRate = THREE.MathUtils.lerp(runtime.coinRate, tick.coinsEarned / Math.max(dt, 1e-4), 0.08);
+  runtime.coinRate = THREE.MathUtils.lerp(
+    runtime.coinRate,
+    tick.coinsEarned / Math.max(dt, 1e-4),
+    0.08,
+  );
 
   // ---- achievements (batched) ----
   achTimer += dt;
@@ -357,9 +401,9 @@ function frame(now: number): void {
   fogColor.copy(sky.horizonColor).lerp(fogTint, 0.42 * (1 - snap.nightness * 0.6));
   const fog = scene.fog as THREE.FogExp2;
   fog.color.copy(fogColor);
-  const mist = weather.fogMultiplier(
-    BIOMES[runtime.biomeId].mist * (1 - biome.blend) + BIOMES[runtime.nextBiomeId].mist * biome.blend,
-  );
+  // blendNumber uses the same road-position weights as every other biome
+  // field — the dominant-id flip at blend 0.5 must not pop the density.
+  const mist = weather.fogMultiplier(blendNumber(vehicle.s, (b) => b.mist));
   fog.density = 0.0038 * mist * (1 + snap.nightness * 0.25);
 
   // Lights follow the sun.
@@ -388,22 +432,6 @@ function frame(now: number): void {
   if (state.settings.sfxVolume !== lastSfxVol) {
     lastSfxVol = state.settings.sfxVolume;
     audio.setSfxVolume(lastSfxVol);
-  }
-
-  // ---- floating origin ----
-  const pos = vehicle.root.position;
-  if (Math.abs(pos.x) > 2048 || Math.abs(pos.z) > 2048) {
-    const dx = -Math.round(pos.x);
-    const dz = -Math.round(pos.z);
-    path.shiftOrigin(dx, dz);
-    chunks.shiftOrigin(dx, dz);
-    chase.shiftOrigin(dx, dz);
-    weather.shiftOrigin(dx, dz);
-    pickups.shiftOrigin(dx, dz);
-    sun.position.x += dx;
-    sun.position.z += dz;
-    sun.target.position.x += dx;
-    sun.target.position.z += dz;
   }
 
   // ---- autosave ----

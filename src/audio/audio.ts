@@ -30,6 +30,8 @@ interface Mood {
 
 /** How long setEnabled(false) takes to fade out before we suspend the context. */
 const DISABLE_FADE_SEC = 0.5;
+/** Minimum ms between resume() attempts when the context is suspended while enabled. */
+const RESUME_RETRY_MS = 1000;
 /** Crossfade length when the biome (and therefore the palette) changes. */
 const BIOME_FADE_SEC = 5;
 
@@ -64,6 +66,8 @@ export function createAudioEngine(): AudioEngine {
   let sfxVol = 0.8;
   /** ctx.currentTime at which we were disabled; used to suspend after the fade. */
   let disabledAt = -1;
+  /** Date.now() of the last resume() nudge (ctx.currentTime stalls while suspended). */
+  let lastResumeAttemptMs = -Infinity;
 
   // --- graph + layers (built in start()) -----------------------------------
   let master: GainNode | null = null;
@@ -102,8 +106,8 @@ export function createAudioEngine(): AudioEngine {
   function build(): void {
     const AC: typeof AudioContext | undefined =
       typeof window !== 'undefined'
-        ? window.AudioContext ??
-          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext
+        ? (window.AudioContext ??
+          (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext)
         : undefined;
     if (!AC) {
       failed = true;
@@ -229,7 +233,17 @@ export function createAudioEngine(): AudioEngine {
           }
           return;
         }
-        if (ctx.state !== 'running') return; // resume still pending
+        if (ctx.state !== 'running') {
+          // The OS/browser can suspend the context outside our control
+          // (device sleep, output route change). Nudge a throttled resume so
+          // audio recovers without needing another settings toggle.
+          const nowMs = Date.now();
+          if (nowMs - lastResumeAttemptMs >= RESUME_RETRY_MS) {
+            lastResumeAttemptMs = nowMs;
+            void ctx.resume?.().catch?.(() => undefined);
+          }
+          return;
+        }
 
         const now = ctx.currentTime;
 

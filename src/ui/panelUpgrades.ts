@@ -5,7 +5,7 @@ import type { UIDeps } from '../types';
 import { formatNumber } from '../types';
 import { el } from './dom';
 import { CURRENCY_ICONS } from './icons';
-import type { PanelDef, PanelManager } from './panels';
+import type { PanelDef } from './panels';
 
 interface RowSpec {
   name: string;
@@ -19,7 +19,7 @@ interface RowSpec {
   buy(): boolean;
 }
 
-export function upgradesPanel(deps: UIDeps, manager: PanelManager): PanelDef {
+export function upgradesPanel(deps: UIDeps): PanelDef {
   const { state, catalogs, actions } = deps;
 
   function buildRow(spec: RowSpec): { node: HTMLElement; update: () => void } {
@@ -36,9 +36,8 @@ export function upgradesPanel(deps: UIDeps, manager: PanelManager): PanelDef {
     const buy = el('button', 'btn btn-accent upgrade-buy');
     const costSpan = el('span', 'mono');
     buy.append(costSpan, document.createTextNode(` ${spec.currencyIcon}`));
-    buy.addEventListener('click', () => {
-      if (spec.buy()) manager.refresh();
-    });
+    // A successful buy emits 'purchase', which re-renders the open panel.
+    buy.addEventListener('click', () => spec.buy());
 
     row.append(info, buy);
 

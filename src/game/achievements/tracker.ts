@@ -64,9 +64,9 @@ export function checkAchievements(state: GameState, runtime: RuntimeState): Achi
     unlockedSet.add(def.id);
     cachedLength = state.achievements.length;
 
-    // Grant reward. Coin bounties count as earned coins, so they can chain
-    // into wealth achievements later in this same pass (defs are ordered by
-    // ascending tier within each ladder).
+    // Grant reward. Coin and token bounties count as earned currency, so
+    // they can chain into wealth/prestige achievements later in this same
+    // pass (defs are ordered by ascending tier within each ladder).
     const reward = def.reward;
     if (reward) {
       if (reward.coins) {
@@ -75,6 +75,7 @@ export function checkAchievements(state: GameState, runtime: RuntimeState): Achi
       }
       if (reward.tokens) {
         state.currencies.tokens += reward.tokens;
+        state.stats.totalTokensEarned += reward.tokens;
       }
       if (reward.relics) {
         state.currencies.relics += reward.relics;

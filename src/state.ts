@@ -1,9 +1,4 @@
-import {
-  SAVE_VERSION,
-  type GameState,
-  type GameStats,
-  type RuntimeState,
-} from './types';
+import { SAVE_VERSION, type GameState, type GameStats, type RuntimeState } from './types';
 
 export function defaultStats(): GameStats {
   return {
@@ -33,7 +28,9 @@ export function defaultStats(): GameStats {
     playTimeSec: 0,
     offlineCoinsEarned: 0,
     topSpeed: 0,
-    sessionCount: 1,
+    // Seeded 0: main.ts increments once per boot, so the first-ever session
+    // counts as 1 and "Welcome Back" (goal 2) waits for a genuine return.
+    sessionCount: 0,
   };
 }
 

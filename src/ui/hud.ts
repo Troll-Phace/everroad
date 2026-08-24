@@ -3,7 +3,7 @@
  * only writes to the DOM when a displayed value actually changes.
  */
 import type { UIDeps } from '../types';
-import { BIOME_NAMES, formatNumber } from '../types';
+import { BIOME_NAMES, formatMiles, formatNumber } from '../types';
 import { classToggler, el, replayAnimation, textUpdater } from './dom';
 import { CURRENCY_ICONS, TIME_ICONS, WEATHER_ICONS } from './icons';
 
@@ -93,9 +93,6 @@ export function initHUD(deps: UIDeps, root: HTMLElement): void {
   const toggleDriftHidden = classToggler(driftPill, 'hidden');
   const toggleCombo = classToggler(combo, 'hidden');
 
-  // Track token/relic "revealed" so rows never re-hide after first earn.
-  let tokensSeen = false;
-  let relicsSeen = false;
   let lastCombo = 1;
   let comboTimerMax = 0;
   let lastComboPct = -1;
@@ -107,8 +104,11 @@ export function initHUD(deps: UIDeps, root: HTMLElement): void {
     // Currencies
     setCoin(formatNumber(c.coins));
     setCoinRate(`+${formatNumber(runtime.coinRate)}/s`);
-    tokensSeen = tokensSeen || c.tokens > 0 || s.totalTokensEarned > 0;
-    relicsSeen = relicsSeen || c.relics > 0 || s.relicsFound > 0;
+    // Reveal token/relic rows once earned. Derived from persistent state (the
+    // lifetime stats survive spending and prestige) rather than a closure
+    // latch, so a resetSave/importSave correctly re-hides them.
+    const tokensSeen = c.tokens > 0 || s.totalTokensEarned > 0;
+    const relicsSeen = c.relics > 0 || s.relicsFound > 0;
     toggleTokenRow(!tokensSeen);
     toggleRelicRow(!relicsSeen);
     if (tokensSeen) setToken(formatNumber(c.tokens));
@@ -138,9 +138,10 @@ export function initHUD(deps: UIDeps, root: HTMLElement): void {
       // The engine doesn't expose a max timer; track the high-water mark so
       // the bar drains proportionally.
       if (runtime.comboTimer > comboTimerMax) comboTimerMax = runtime.comboTimer;
-      const pct = comboTimerMax > 0
-        ? Math.round(Math.max(0, Math.min(1, runtime.comboTimer / comboTimerMax)) * 200) / 2
-        : 0;
+      const pct =
+        comboTimerMax > 0
+          ? Math.round(Math.max(0, Math.min(1, runtime.comboTimer / comboTimerMax)) * 200) / 2
+          : 0;
       if (pct !== lastComboPct) {
         lastComboPct = pct;
         comboFill.style.width = `${pct}%`;
@@ -151,7 +152,7 @@ export function initHUD(deps: UIDeps, root: HTMLElement): void {
     lastCombo = runtime.combo;
 
     // Odometer
-    setJourney(s.journeyMiles.toFixed(1));
+    setJourney(formatMiles(s.journeyMiles));
     setLifetime(`${formatNumber(s.lifetimeMiles)} mi lifetime`);
     setTrophies(`${state.achievements.length}/${catalogs.achievements.length} 🏆`);
 

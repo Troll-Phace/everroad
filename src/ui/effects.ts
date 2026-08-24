@@ -60,7 +60,9 @@ export function initEffects(deps: UIDeps, root: HTMLElement): Effects {
       if (def.reward) {
         const parts = Object.entries(def.reward)
           .filter(([, v]) => (v ?? 0) > 0)
-          .map(([k, v]) => `+${formatNumber(v!)} ${CURRENCY_ICONS[k as keyof typeof CURRENCY_ICONS]}`);
+          .map(
+            ([k, v]) => `+${formatNumber(v!)} ${CURRENCY_ICONS[k as keyof typeof CURRENCY_ICONS]}`,
+          );
         if (parts.length > 0) body += `  ·  ${parts.join('  ')}`;
       }
       toast({ icon: def.icon, title: 'Achievement unlocked!', body });
@@ -92,8 +94,13 @@ export function initEffects(deps: UIDeps, root: HTMLElement): Effects {
   });
 
   // ---- offline summary modal ----------------------------------------------
+  // Singleton: a later 'offlineSummary' replaces the modal rather than
+  // stacking a second undismissed overlay on top of it.
+  let offlineOverlay: HTMLElement | null = null;
   bus.on('offlineSummary', (p) => {
+    offlineOverlay?.remove();
     const overlay = el('div', 'modal-overlay');
+    offlineOverlay = overlay;
     const card = el('div', 'panel-glass modal-card panel-in');
     card.append(el('div', 'modal-kicker', 'Welcome back'));
     card.append(el('h2', 'modal-title', 'While you were away…'));
@@ -102,7 +109,10 @@ export function initEffects(deps: UIDeps, root: HTMLElement): Effects {
     timeRow.append(el('span', 'offline-icon', '⏱'), el('span', 'mono', formatDuration(p.seconds)));
     const arrow = el('div', 'offline-arrow', '→');
     const coinRow = el('div', 'offline-row');
-    coinRow.append(el('span', 'offline-icon', '🪙'), el('span', 'mono', `+${formatNumber(p.coins)}`));
+    coinRow.append(
+      el('span', 'offline-icon', '🪙'),
+      el('span', 'mono', `+${formatNumber(p.coins)}`),
+    );
     rows.append(timeRow, arrow, coinRow);
     card.append(rows);
     card.append(el('p', 'modal-sub', 'The road kept rolling without you.'));
@@ -124,7 +134,11 @@ export function initEffects(deps: UIDeps, root: HTMLElement): Effects {
     void flash.offsetWidth;
     flash.classList.add('prestige-flash-run');
     window.setTimeout(() => flash.classList.add('hidden'), 1800);
-    toast({ icon: '🌅', title: 'New Journey begins', body: `+${formatNumber(p.tokensGained)} 🌅 Horizon Tokens` });
+    toast({
+      icon: '🌅',
+      title: 'New Journey begins',
+      body: `+${formatNumber(p.tokensGained)} 🌅 Horizon Tokens`,
+    });
   });
 
   return { toast };

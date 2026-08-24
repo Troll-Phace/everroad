@@ -107,6 +107,16 @@ export function initEconomy(state: GameState): void {
   state.currencies.tokens = sanitizeNumber(state.currencies.tokens);
   state.currencies.relics = sanitizeNumber(state.currencies.relics);
 
+  // Stats must be finite and non-negative too — a poisoned import (e.g.
+  // "journeyMiles":1e309 parsing to Infinity) would otherwise mint infinite
+  // prestige tokens. Arrays keep their shape; every other field is numeric.
+  const stats = state.stats as unknown as Record<string, unknown>;
+  for (const key of Object.keys(stats)) {
+    if (!Array.isArray(stats[key])) stats[key] = sanitizeNumber(stats[key]);
+  }
+  if (!Array.isArray(state.stats.biomesVisited)) state.stats.biomesVisited = ['meadow'];
+  if (!Array.isArray(state.stats.weatherSeen)) state.stats.weatherSeen = ['clear'];
+
   // Starter car is always owned; drop unknown car ids.
   if (!Array.isArray(state.ownedCars)) state.ownedCars = [];
   state.ownedCars = state.ownedCars.filter((id) => CARS.some((c) => c.id === id));
@@ -218,7 +228,10 @@ export function getIdleCoinsPerSec(state: GameState): number {
  * Mutates state in place.
  */
 export function applyTick(state: GameState, ctx: EconomyContext): TickResult {
-  const miles = Math.max(0, ctx.milesDelta);
+  // A single NaN milesDelta or dtSec would poison coins/miles/playTime
+  // permanently (Math.max(0, NaN) is NaN), so non-finite inputs earn nothing.
+  const miles = Number.isFinite(ctx.milesDelta) ? Math.max(0, ctx.milesDelta) : 0;
+  const dtSec = Number.isFinite(ctx.dtSec) ? Math.max(0, ctx.dtSec) : 0;
   const combo = ctx.isActive ? Math.max(1, ctx.combo) : 1;
   const coinsEarned = miles * getCoinRatePerMile(state, ctx) * combo;
 
@@ -228,7 +241,7 @@ export function applyTick(state: GameState, ctx: EconomyContext): TickResult {
   s.journeyMiles += miles;
   s.lifetimeMiles += miles;
   s.lifetimeCoins += coinsEarned;
-  s.playTimeSec += Math.max(0, ctx.dtSec);
+  s.playTimeSec += dtSec;
 
   if (ctx.isActive) s.activeMiles += miles;
   else s.idleMiles += miles;
@@ -274,11 +287,7 @@ export function applyTick(state: GameState, ctx: EconomyContext): TickResult {
 // Per-car upgrades
 // ---------------------------------------------------------------------------
 
-export function getUpgradeLevel(
-  state: GameState,
-  carId: string,
-  upgradeId: UpgradeKind,
-): number {
+export function getUpgradeLevel(state: GameState, carId: string, upgradeId: UpgradeKind): number {
   const rec = state.upgrades[carId];
   if (!rec) return 0;
   const lvl = rec[upgradeId];
@@ -286,11 +295,7 @@ export function getUpgradeLevel(
 }
 
 /** Cost of the next level of a part (Infinity at max). Quick-spool applies. */
-export function getUpgradeCost(
-  state: GameState,
-  carId: string,
-  upgradeId: UpgradeKind,
-): number {
+export function getUpgradeCost(state: GameState, carId: string, upgradeId: UpgradeKind): number {
   const def = getUpgradeDef(upgradeId);
   const level = getUpgradeLevel(state, carId, upgradeId);
   if (level >= def.maxLevel) return Infinity;
@@ -299,11 +304,7 @@ export function getUpgradeCost(
 }
 
 /** Buy the next level of a part with coins. Returns false if not possible. */
-export function buyUpgrade(
-  state: GameState,
-  carId: string,
-  upgradeId: UpgradeKind,
-): boolean {
+export function buyUpgrade(state: GameState, carId: string, upgradeId: UpgradeKind): boolean {
   if (!state.ownedCars.includes(carId)) return false;
   const cost = getUpgradeCost(state, carId, upgradeId);
   if (!isFinite(cost) || state.currencies.coins < cost) return false;
@@ -382,14 +383,8 @@ export function getPrestigePreview(state: GameState): PrestigePreview {
   let tokensOnPrestige = 0;
   if (canPrestige) {
     const tokenMagnet = globalLevel(state, 'token-magnet');
-    const base = Math.pow(
-      state.stats.journeyMiles / PRESTIGE_BASE_MILES,
-      PRESTIGE_TOKEN_EXPONENT,
-    );
-    tokensOnPrestige = Math.max(
-      1,
-      Math.floor(base * (1 + tokenMagnet * TOKEN_MAGNET_PER_LEVEL)),
-    );
+    const base = Math.pow(state.stats.journeyMiles / PRESTIGE_BASE_MILES, PRESTIGE_TOKEN_EXPONENT);
+    tokensOnPrestige = Math.max(1, Math.floor(base * (1 + tokenMagnet * TOKEN_MAGNET_PER_LEVEL)));
   }
   return { tokensOnPrestige, milesRequired, canPrestige };
 }
@@ -426,8 +421,7 @@ export function doPrestige(state: GameState): number {
  * income, scaled by the current combo — pickups should feel juicy.
  */
 export function getPickupCoinValue(state: GameState, combo: number): number {
-  const coinsPerSec =
-    (getCarSpeed(state) / 3600) * getCoinRatePerMile(state, NEUTRAL_CTX);
+  const coinsPerSec = (getCarSpeed(state) / 3600) * getCoinRatePerMile(state, NEUTRAL_CTX);
   return Math.max(1, Math.ceil(coinsPerSec * PICKUP_VALUE_SECONDS * Math.max(1, combo)));
 }
 

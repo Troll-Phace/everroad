@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { formatNumber, formatDuration } from './types';
+import { formatNumber, formatMiles, formatDuration } from './types';
 
 describe('formatNumber', () => {
   it('shows whole coins below a thousand', () => {
@@ -23,6 +23,40 @@ describe('formatNumber', () => {
 
   it('renders a non-finite total as infinity rather than NaN', () => {
     expect(formatNumber(Infinity)).toBe('∞');
+  });
+
+  it('promotes to the next unit when rounding would show a four-digit mantissa', () => {
+    expect(formatNumber(999_949)).toBe('1.0M');
+    expect(formatNumber(999_950)).toBe('1.0M');
+    expect(formatNumber(999_999)).toBe('1.0M');
+    expect(formatNumber(999_499)).toBe('999K');
+  });
+
+  it('crosses every suffix boundary cleanly', () => {
+    expect(formatNumber(1e6)).toBe('1.0M');
+    expect(formatNumber(1e9)).toBe('1.0B');
+    expect(formatNumber(1e12)).toBe('1.0T');
+    expect(formatNumber(1e15)).toBe('1.0Qa');
+    expect(formatNumber(1e18)).toBe('1.0Qi');
+    expect(formatNumber(1e21)).toBe('1.0Sx');
+    expect(formatNumber(1e24)).toBe('1.0Sp');
+  });
+
+  it('falls back to exponent form past the last suffix', () => {
+    expect(formatNumber(1e27)).toBe('1.0e27');
+    expect(formatNumber(2.5e30)).toBe('2.5e30');
+  });
+});
+
+describe('formatMiles', () => {
+  it('keeps exact tenths below ten thousand miles', () => {
+    expect(formatMiles(0)).toBe('0.0');
+    expect(formatMiles(9999.94)).toBe('9999.9');
+  });
+
+  it('compacts once the odometer reaches ten thousand miles', () => {
+    expect(formatMiles(10_000)).toBe('10.0K');
+    expect(formatMiles(1_500_000)).toBe('1.5M');
   });
 });
 

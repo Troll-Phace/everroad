@@ -32,13 +32,13 @@ export type TimePhase = 'dawn' | 'day' | 'sunset' | 'night';
 export type WeatherId = 'clear' | 'rain' | 'fog' | 'leaves' | 'aurora';
 
 export type BiomeId =
-  | 'meadow'     // rolling green meadows
-  | 'farmland'   // golden wheat
-  | 'autumn'     // HERO biome: deep oranges/reds, dramatic sunsets
-  | 'lavender'   // purple fields
-  | 'cherry'     // blossom groves, pink petals
-  | 'wetland'    // misty marsh at dawn
-  | 'pine'       // cool misty pine hills
+  | 'meadow' // rolling green meadows
+  | 'farmland' // golden wheat
+  | 'autumn' // HERO biome: deep oranges/reds, dramatic sunsets
+  | 'lavender' // purple fields
+  | 'cherry' // blossom groves, pink petals
+  | 'wetland' // misty marsh at dawn
+  | 'pine' // cool misty pine hills
   | 'sunflower'; // bright sunflower fields
 
 export const BIOME_ORDER: BiomeId[] = [
@@ -111,11 +111,11 @@ export interface CarDef {
 // ---------------------------------------------------------------------------
 
 export type UpgradeKind =
-  | 'engine'   // + top speed
-  | 'tuning'   // + coin multiplier
-  | 'tires'    // + drift combo effectiveness
-  | 'magnet'   // + pickup attraction radius
-  | 'chime';   // + relic spot chance / relic value
+  | 'engine' // + top speed
+  | 'tuning' // + coin multiplier
+  | 'tires' // + drift combo effectiveness
+  | 'magnet' // + pickup attraction radius
+  | 'chime'; // + relic spot chance / relic value
 
 export interface UpgradeDef {
   id: UpgradeKind;
@@ -183,7 +183,7 @@ export interface GameStats {
 export interface GameSettings {
   audioEnabled: boolean;
   musicVolume: number; // 0..1
-  sfxVolume: number;   // 0..1
+  sfxVolume: number; // 0..1
   quality: 'low' | 'medium' | 'high';
   showFps: boolean;
 }
@@ -272,8 +272,8 @@ export type AchievementCategory =
   | 'distance'
   | 'wealth'
   | 'garage'
-  | 'skill'      // drift / near-miss / combo
-  | 'explorer'   // biomes, weather, time-of-day
+  | 'skill' // drift / near-miss / combo
+  | 'explorer' // biomes, weather, time-of-day
   | 'dedication' // playtime, sessions, offline
   | 'prestige'
   | 'secret';
@@ -388,7 +388,11 @@ export interface AudioEngine {
 
 export const SAVE_VERSION = 1;
 
-/** Format a number compactly: 1.2K, 3.4M, 5.6B ... */
+/**
+ * Format a number compactly: 1.2K, 3.4M, 5.6B ... Values past the last suffix
+ * (>= 1e27, beyond Sp) fall back to exponent form, e.g. "1.0e27", so the
+ * string stays bounded instead of growing a multi-digit mantissa.
+ */
 export function formatNumber(n: number): string {
   if (!isFinite(n)) return '∞';
   const abs = Math.abs(n);
@@ -400,7 +404,25 @@ export function formatNumber(n: number): string {
     v /= 1000;
     u++;
   }
-  return `${v.toFixed(v < 100 ? 1 : 0)}${units[u]}`;
+  // Rounding at display precision can carry the mantissa to 1000
+  // (e.g. 999,950 -> "1000K"); promote to the next unit when it does.
+  let str = v.toFixed(Math.abs(v) < 100 ? 1 : 0);
+  if (Math.abs(Number(str)) >= 1000 && u < units.length - 1) {
+    v /= 1000;
+    u++;
+    str = v.toFixed(1);
+  }
+  // Suffixes exhausted (mantissa still >= 1000 at 'Sp'): exponent form.
+  if (Math.abs(Number(str)) >= 1000) return n.toExponential(1).replace('e+', 'e');
+  return `${str}${units[u]}`;
+}
+
+/**
+ * Format a miles readout: exact tenths below 10,000 mi, compact
+ * (formatNumber) above, so long runs never grow an unbounded-width string.
+ */
+export function formatMiles(mi: number): string {
+  return mi >= 10_000 ? formatNumber(mi) : mi.toFixed(1);
 }
 
 /** Format seconds as "2h 14m" / "3d 4h" / "45s". */

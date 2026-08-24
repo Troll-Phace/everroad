@@ -72,7 +72,9 @@ function hydrate(loaded: Partial<GameState>): GameState {
     settings: { ...base.settings, ...loaded.settings },
     upgrades: loaded.upgrades ?? base.upgrades,
     globalUpgrades: loaded.globalUpgrades ?? base.globalUpgrades,
-    achievements: loaded.achievements ?? [],
+    // Deduped: repeated ids in a crafted import would otherwise re-grant
+    // bounties whenever the array is rebuilt around them.
+    achievements: Array.isArray(loaded.achievements) ? [...new Set(loaded.achievements)] : [],
     ownedCars: loaded.ownedCars?.length ? loaded.ownedCars : base.ownedCars,
   };
   if (!state.ownedCars.includes(state.currentCarId)) {

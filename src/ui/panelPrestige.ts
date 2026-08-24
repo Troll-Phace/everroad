@@ -2,7 +2,7 @@
  * Prestige panel: New Journey explanation, preview, and a two-step confirm.
  */
 import type { UIDeps } from '../types';
-import { formatNumber } from '../types';
+import { formatMiles, formatNumber } from '../types';
 import { el } from './dom';
 import type { PanelDef, PanelManager } from './panels';
 
@@ -72,13 +72,14 @@ export function prestigePanel(deps: UIDeps, manager: PanelManager): PanelDef {
       const update = (): void => {
         const preview = actions.getPrestigePreview();
         const miles = state.stats.journeyMiles;
-        journeyVal.textContent = `${miles.toFixed(1)} mi`;
+        journeyVal.textContent = `${formatMiles(miles)} mi`;
         gainVal.textContent = `+${formatNumber(preview.tokensOnPrestige)} 🌅`;
-        const pct = preview.milesRequired > 0 ? Math.min(1, miles / preview.milesRequired) * 100 : 100;
+        const pct =
+          preview.milesRequired > 0 ? Math.min(1, miles / preview.milesRequired) * 100 : 100;
         fill.style.width = `${pct}%`;
         progressLabel.textContent = preview.canPrestige
           ? 'Ready — the horizon calls.'
-          : `${miles.toFixed(1)} / ${formatNumber(preview.milesRequired)} mi required`;
+          : `${formatMiles(miles)} / ${formatNumber(preview.milesRequired)} mi required`;
         if (!armed) btn.disabled = !preview.canPrestige;
       };
       update();

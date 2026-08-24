@@ -108,7 +108,16 @@ export function trophiesPanel(deps: UIDeps): PanelDef {
     title: 'Trophies',
     key: 'T',
     render(content) {
-      if (!grid) grid = buildGrid();
+      if (!grid) {
+        grid = buildGrid();
+      } else {
+        // Re-sync every cached card on open: importSave/resetSave can change
+        // unlock state without firing 'achievement' events.
+        for (const def of catalogs.achievements) {
+          const card = cards.get(def.id);
+          if (card) applyUnlockState(def, card);
+        }
+      }
 
       // Header progress
       const total = catalogs.achievements.length;

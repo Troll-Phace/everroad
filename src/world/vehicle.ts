@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import type { EventBus } from '../types';
 import type { Input } from '../engine/input';
 import { RoadPath, ROAD_HALF_WIDTH } from './roadPath';
-import { buildCar, animateCar, hoverBob, type CarRig } from './car';
+import { buildCar, animateCar, disposeCar, hoverBob, type CarRig } from './car';
 import type { CarStyle } from '../types';
 
 const MPH_TO_MPS = 0.44704;
@@ -58,15 +58,17 @@ export class Vehicle {
 
   setStyle(style: CarStyle): void {
     this.root.remove(this.rig.group);
+    disposeCar(this.rig);
     this.rig = buildCar(style);
     this.root.add(this.rig.group);
   }
 
   shiftOrigin(dx: number, dz: number): void {
-    // Path samples were shifted; root position is recomputed each frame from
-    // the path, so nothing to do here — kept for symmetry/clarity.
-    void dx;
-    void dz;
+    // root.position was computed from the pre-shift path this frame; carry it
+    // along so the frame renders consistently. The next update() recomputes
+    // it from the (already shifted) path.
+    this.root.position.x += dx;
+    this.root.position.z += dz;
   }
 
   update(dt: number): void {
@@ -115,7 +117,11 @@ export class Vehicle {
       const target = THREE.MathUtils.clamp(2.0 + wander, 0.8, 3.4);
       this.latVel = THREE.MathUtils.damp(this.latVel, (target - this.lateral) * 0.9, 4, dt);
     }
-    this.lateral = THREE.MathUtils.clamp(this.lateral + this.latVel * dt, -MAX_LATERAL, MAX_LATERAL);
+    this.lateral = THREE.MathUtils.clamp(
+      this.lateral + this.latVel * dt,
+      -MAX_LATERAL,
+      MAX_LATERAL,
+    );
 
     // ---- advance along road ----
     this.s += this.speedMps * dt;
@@ -138,8 +144,9 @@ export class Vehicle {
     const ahead = this.path.pose(this.s + 3, poseScratch2);
     const pitch = Math.atan2(ahead.pos.y - pose.pos.y, 3);
     const headingDelta = ahead.heading - heading;
-    const roll = THREE.MathUtils.clamp(-headingDelta * this.speedMps * 0.05, -0.12, 0.12)
-      + (this.isDrifting ? -steer * 0.06 : 0);
+    const roll =
+      THREE.MathUtils.clamp(-headingDelta * this.speedMps * 0.05, -0.12, 0.12) +
+      (this.isDrifting ? -steer * 0.06 : 0);
 
     this.yaw = heading + this.driftYaw + this.latVel * -0.012;
     this.root.rotation.set(0, 0, 0);
