@@ -1,5 +1,5 @@
 /**
- * Everroad — economy core.
+ * EverRoad — economy core.
  *
  * Pure logic: earning rates, tick application, purchases, prestige.
  * All functions operate on the shared GameState; applyTick and the buy/

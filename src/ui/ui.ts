@@ -1,5 +1,5 @@
 /**
- * Everroad UI module entry point.
+ * EverRoad UI module entry point.
  *
  * Owns everything inside #ui-root: corner HUD, center panels, toasts,
  * banners and modals. All mutations flow through deps.actions; state and
@@ -55,7 +55,7 @@ export function initUI(deps: UIDeps): void {
     openUpdate: () => panels.open(UPDATE_PANEL_ID),
   });
 
-  // The one network request Everroad makes, and only in the desktop build: ask
+  // The one network request EverRoad makes, and only in the desktop build: ask
   // the release feed whether anything newer exists. Fired once, here, on the
   // way up — the main process never checks on its own, so the preference in
   // Settings is the whole story (src/ui/update.ts).

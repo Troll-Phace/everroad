@@ -1,4 +1,4 @@
-# Everroad — Audio Module
+# EverRoad — Audio Module
 
 Fully generative Web Audio soundscape. No audio files, no DOM, no timers —
 every sound is synthesized from oscillators and noise buffers, and every

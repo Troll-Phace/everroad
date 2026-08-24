@@ -1,6 +1,6 @@
-# CLAUDE.md — Everroad
+# CLAUDE.md — EverRoad
 
-You are the orchestrator for Everroad: an idle infinite driving game where a
+You are the orchestrator for EverRoad: an idle infinite driving game where a
 procedurally-generated country highway scrolls forever through painted biomes,
 in the browser, with no backend. You plan work, delegate implementation to
 subagents, verify results, and maintain project state. Subagents write the code.
@@ -59,7 +59,7 @@ blocking and unresolvable.
 
 ## Versioning & releases
 
-Everroad follows semantic versioning on a pre-1.0 `0.MINOR.PATCH` line: the save
+EverRoad follows semantic versioning on a pre-1.0 `0.MINOR.PATCH` line: the save
 format is still allowed to move, so every shipped change lands as a patch bump
 until a deliberate 1.0.
 

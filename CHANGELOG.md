@@ -1,10 +1,10 @@
 # Changelog
 
-All notable changes to Everroad are recorded here. The format follows
-[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and Everroad follows
+All notable changes to EverRoad are recorded here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and EverRoad follows
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Everroad is pre-1.0: the `0.MINOR.PATCH` line means the public surface — the
+EverRoad is pre-1.0: the `0.MINOR.PATCH` line means the public surface — the
 save format above all — is still allowed to move, and every shipped change
 lands as a patch bump until the game reaches a deliberate 1.0.
 
@@ -14,6 +14,11 @@ What's New panel renders; CI fails if the two drift apart. Edit this file, not
 the generated module.
 
 ## [Unreleased]
+
+### Changed
+
+- The road signs got repainted: the game is **EverRoad**, with a capital R,
+  everywhere it names itself.
 
 ## [0.1.20] - 2026-08-24
 
@@ -63,26 +68,26 @@ the generated module.
 
 ### Added
 
-- **Everroad updates itself.** The desktop app checks for a newer release when
+- **EverRoad updates itself.** The desktop app checks for a newer release when
   it starts, and tells you on the main menu when one is waiting. Open the notice
   to read what changed and download it without leaving the game. On Windows and
-  on the Linux AppImage the update installs itself and Everroad restarts into
+  on the Linux AppImage the update installs itself and EverRoad restarts into
   it; on macOS, the portable Windows build and the Fedora RPM it lands in your
   Downloads folder for you to open, because those builds cannot replace
   themselves.
-- **A warning before an update that could cost you your journey.** Everroad is
+- **A warning before an update that could cost you your journey.** EverRoad is
   still finding its shape, and a release is occasionally allowed to change how
   saves are stored. When one does, the update notice says so before you download
   it, and tells you to copy your save code from Settings first.
 - **Updates in Settings.** A switch for the check on launch, a button to look
   now, and a line saying where the last check got to. The check is the only
-  request Everroad makes of anything, and turning it off means it is not made.
+  request EverRoad makes of anything, and turning it off means it is not made.
 
 ## [0.1.17] - 2026-08-24
 
 ### Added
 
-- Everroad now ships as a **desktop app**. Release builds are wrapped in
+- EverRoad now ships as a **desktop app**. Release builds are wrapped in
   Electron and published to GitHub Releases for macOS (Apple silicon and Intel),
   Windows (installer or portable) and Linux (AppImage, or an RPM for
   Fedora/RHEL). The browser build is unchanged and remains how the game is
@@ -251,7 +256,7 @@ the generated module.
 
 ### Added
 
-- **The first playable build of Everroad.** A procedurally generated country
+- **The first playable build of EverRoad.** A procedurally generated country
   highway that scrolls forever through painted biomes: driving, the road, chunk
   streaming, biomes, sky and day/night, weather, scenery and pickups.
 - Economy, upgrades, the car catalog, prestige and achievements.

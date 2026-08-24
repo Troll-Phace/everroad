@@ -1,5 +1,5 @@
 /**
- * Shared low-level Web Audio helpers for the Everroad audio module.
+ * Shared low-level Web Audio helpers for the EverRoad audio module.
  * No imports from outside src/audio/ except '../types'.
  */
 

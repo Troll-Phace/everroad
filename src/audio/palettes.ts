@@ -1,5 +1,5 @@
 /**
- * Per-biome musical palettes for Everroad's generative score.
+ * Per-biome musical palettes for EverRoad's generative score.
  *
  * Each biome gets a key/mode chosen for its mood. Chords are expressed as
  * semitone offsets from `root` (a MIDI note in the C2–E3 region so pads sit

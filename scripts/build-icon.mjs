@@ -8,7 +8,7 @@
  * sizes) from this one PNG, so this is the only icon artwork in the repository.
  *
  * It is drawn here rather than committed as opaque binary art for the same
- * reason every other asset in Everroad is procedural: the palette is the
+ * reason every other asset in EverRoad is procedural: the palette is the
  * loading screen's gradient from src/style.css, and if that gradient is ever
  * retuned this file is one edit and a rerun away from matching it again. The
  * subject matches the 🌄 favicon in index.html — a sunrise over hills, with the

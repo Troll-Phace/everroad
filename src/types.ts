@@ -1,5 +1,5 @@
 /**
- * Everroad — shared type contracts.
+ * EverRoad — shared type contracts.
  *
  * This file is the single source of truth for the interfaces between
  * subsystems (engine, economy, achievements, audio, save, ui).

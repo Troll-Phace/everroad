@@ -1,5 +1,5 @@
 #!/bin/sh
-# Everroad pre-push guard: run exactly what CI runs, locally, before any push.
+# EverRoad pre-push guard: run exactly what CI runs, locally, before any push.
 set -e
 echo "[pre-push] format check..."
 npm run format:check

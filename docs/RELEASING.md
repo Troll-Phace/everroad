@@ -1,6 +1,6 @@
-# Releasing Everroad
+# Releasing EverRoad
 
-Everroad ships two ways from one bundle: as a web page you serve yourself, and
+EverRoad ships two ways from one bundle: as a web page you serve yourself, and
 as an Electron-wrapped desktop app published to
 [GitHub Releases](https://github.com/Troll-Phace/everroad/releases). This
 document is the procedure for cutting one of those releases.
@@ -30,7 +30,7 @@ See docs/ARCHITECTURE.md §16 for how the pieces fit together.
 
 ## Versioning
 
-Everroad follows [Semantic Versioning](https://semver.org/). It is pre-1.0, and
+EverRoad follows [Semantic Versioning](https://semver.org/). It is pre-1.0, and
 that is a deliberate statement rather than an oversight: the save format is
 still allowed to move. Until there is a considered 1.0, every shipped change is
 a **patch bump** — `0.1.17` to `0.1.18` — and every release is marked as a
@@ -115,7 +115,7 @@ Open the PR, let CI go green, merge it to `main`.
 
 ```bash
 git switch main && git pull
-git tag -a v0.1.18 -m "Everroad 0.1.18"
+git tag -a v0.1.18 -m "EverRoad 0.1.18"
 git push origin v0.1.18
 ```
 
@@ -150,9 +150,9 @@ These are the files a user downloads:
 
 | Platform | Assets |
 |----------|--------|
-| macOS | `Everroad-0.1.18-mac-arm64.dmg`, `-mac-x64.dmg`, and a `.zip` of each |
-| Windows | `Everroad-0.1.18-win-x64-setup.exe` (NSIS installer) and `-win-x64-portable.exe` |
-| Linux | `Everroad-0.1.18-linux-x86_64.AppImage` and `Everroad-0.1.18-linux-x86_64.rpm` |
+| macOS | `EverRoad-0.1.18-mac-arm64.dmg`, `-mac-x64.dmg`, and a `.zip` of each |
+| Windows | `EverRoad-0.1.18-win-x64-setup.exe` (NSIS installer) and `-win-x64-portable.exe` |
+| Linux | `EverRoad-0.1.18-linux-x86_64.AppImage` and `EverRoad-0.1.18-linux-x86_64.rpm` |
 
 The two Windows names must stay distinct. Both targets emit an `.exe` for the
 same os/arch, so they shared one filename under the global `artifactName` until
@@ -265,20 +265,20 @@ behaviour, and it is why the workflow drafts first and publishes last.
 
 ## Unsigned builds: what a user sees
 
-Everroad has no Apple Developer certificate and no Windows code-signing
+EverRoad has no Apple Developer certificate and no Windows code-signing
 certificate. The builds are therefore unsigned, and both desktop platforms treat
 an unsigned app from the internet as suspicious. This is expected, it is not a
 bug in the build, and it needs saying plainly on the download page.
 
 **macOS.** The `.app` carries a quarantine flag after download. Gatekeeper
-refuses the first launch with *"Everroad" cannot be opened because the developer
+refuses the first launch with *"EverRoad" cannot be opened because the developer
 cannot be verified* — or, on recent macOS, the more alarming and quite
-misleading *"Everroad" is damaged and can't be opened*. The app is not damaged;
+misleading *"EverRoad" is damaged and can't be opened*. The app is not damaged;
 it is unsigned. The user opens it once via **right-click → Open → Open**, or
 clears the flag directly:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/Everroad.app
+xattr -dr com.apple.quarantine /Applications/EverRoad.app
 ```
 
 After the first successful open, macOS remembers and launches it normally.
@@ -290,14 +290,14 @@ count grows, but for a new release it will always appear at first.
 **Linux.** The AppImage needs the executable bit, which some browsers strip:
 
 ```bash
-chmod +x Everroad-0.1.18-linux-x86_64.AppImage
-./Everroad-0.1.18-linux-x86_64.AppImage
+chmod +x EverRoad-0.1.18-linux-x86_64.AppImage
+./EverRoad-0.1.18-linux-x86_64.AppImage
 ```
 
 On Fedora or RHEL, install the RPM instead:
 
 ```bash
-sudo dnf install ./Everroad-0.1.18-linux-x86_64.rpm
+sudo dnf install ./EverRoad-0.1.18-linux-x86_64.rpm
 ```
 
 The RPM is unsigned, so `dnf` will ask to confirm an untrusted package. Building

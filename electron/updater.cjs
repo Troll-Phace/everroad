@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Everroad desktop — the update checker.
+ * EverRoad desktop — the update checker.
  *
  * All of it runs in the main process, deliberately. The renderer's CSP pins
  * `connect-src 'self'` (§16.3) and there is no reason to widen it: the page
@@ -23,7 +23,7 @@
  *   Windows NSIS   in-place   unsigned is fine; SmartScreen warns, as it does today
  *   Linux AppImage in-place   electron-updater swaps the AppImage
  *   macOS          manual     Squirrel.Mac verifies the incoming bundle's
- *                             signature against the running app's. Everroad is
+ *                             signature against the running app's. EverRoad is
  *                             unsigned (§16.7), so this fails at install with
  *                             "Could not get code signature for running
  *                             application". Not a bug to fix — a certificate to
@@ -179,7 +179,7 @@ function fetchBuffer(url, { limitBytes = 512 * 1024 * 1024, onProgress, headers 
     // api.github.com rejects a request with no User-Agent outright. Electron
     // sends a Chrome-shaped one by default, but relying on a default for the
     // difference between 200 and 403 is how this breaks on an Electron bump.
-    request.setHeader('User-Agent', `Everroad/${app.getVersion()}`);
+    request.setHeader('User-Agent', `EverRoad/${app.getVersion()}`);
     for (const [name, value] of Object.entries(headers ?? {})) {
       request.setHeader(name, value);
     }
@@ -410,7 +410,7 @@ function sha512(buffer) {
   return crypto.createHash('sha512').update(buffer).digest('base64');
 }
 
-/** `Everroad-0.1.18-mac-arm64 (1).zip` — never silently overwrite a previous download. */
+/** `EverRoad-0.1.18-mac-arm64 (1).zip` — never silently overwrite a previous download. */
 function freePath(dir, name) {
   const ext = path.extname(name);
   const stem = path.basename(name, ext);
@@ -504,7 +504,7 @@ function reveal() {
  * The URL is *built* from two module constants and a version string the update
  * feed supplied, never passed in from the renderer. There is no argument to
  * this function precisely so that a compromised page has no string to steer it
- * with; the worst it can do is open Everroad's own releases page.
+ * with; the worst it can do is open EverRoad's own releases page.
  */
 function openReleasePage() {
   if (!status.version) return;

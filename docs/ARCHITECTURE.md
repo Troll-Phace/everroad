@@ -1,6 +1,6 @@
-# Everroad — Architecture Reference
+# EverRoad — Architecture Reference
 
-The full technical reference for Everroad. This document is pull-context: it is
+The full technical reference for EverRoad. This document is pull-context: it is
 not loaded into any session automatically. Cite the sections a task touches and
 read those before delegating or implementing.
 
@@ -27,7 +27,7 @@ read those before delegating or implementing.
 
 ## 1. Project Philosophy
 
-Everroad is an idle infinite driving game: a car cruises a procedurally
+EverRoad is an idle infinite driving game: a car cruises a procedurally
 generated country highway through blended painted biomes, forever, in a browser
 tab, with no backend and no external assets.
 
@@ -1431,7 +1431,7 @@ them live.
 
 ### 16.1 Two runtimes, one bundle
 
-Everroad ships to two places and builds only once. `vite build` produces
+EverRoad ships to two places and builds only once. `vite build` produces
 `dist/`; the web version serves it, and the desktop version is that same
 directory loaded over `file://` inside an Electron window. There is no desktop
 fork of the game, no build flag that changes what the game does, and no
@@ -1535,11 +1535,11 @@ answers on port 5199, under a CSP that allows inline script.
 `electron/preload.cjs` exposes exactly one object through `contextBridge`:
 
 ```ts
-interface EverroadDesktop {
+interface EverRoadDesktop {
   readonly version: string;      // app.getVersion(), via additionalArguments
   readonly platform: string;     // process.platform
   quit(): void;                  // ipcRenderer.send('everroad:quit')
-  readonly updates?: EverroadUpdates;   // §16.8; absent in the web build
+  readonly updates?: EverRoadUpdates;   // §16.8; absent in the web build
 }
 ```
 
@@ -1647,7 +1647,7 @@ The draft is created up front so three concurrent `electron-builder` runs cannot
 race to create the same release, and it means a failure part-way leaves an
 unpublished draft rather than a broken public release. The release body is the
 version's own CHANGELOG section, extracted by `scripts/release-notes.mjs` rather
-than hand-copied, so the notes are written exactly once. Everroad is pre-1.0, so
+than hand-copied, so the notes are written exactly once. EverRoad is pre-1.0, so
 every `0.x` release is marked a prerelease automatically.
 
 Targets: `dmg` + `zip` for macOS on x64 and arm64 separately (a universal binary
@@ -1683,7 +1683,7 @@ downloads would be worse than no button:
 Windows NSIS      in-place   unsigned is fine; SmartScreen warns, as it does today
 Linux AppImage    in-place   electron-updater swaps the AppImage
 macOS             manual     Squirrel.Mac verifies the incoming bundle's signature
-                             against the running app's, and Everroad is unsigned
+                             against the running app's, and EverRoad is unsigned
                              (§16.7). Not a bug to fix; a certificate to buy.
 Windows portable  manual     target unsupported by electron-updater
 Linux rpm         manual     likewise
@@ -1715,7 +1715,7 @@ over. With neither signal it falls back to the AppImage, which runs anywhere.
 the feed cannot answer is the question worth asking before pressing Download:
 *will this still read my journey?* `SAVE_VERSION` is a compile-time constant
 baked into each bundle, so an old build cannot see the new one's value, and
-Everroad is pre-1.0 — a patch bump is explicitly allowed to move the save
+EverRoad is pre-1.0 — a patch bump is explicitly allowed to move the save
 format. So each release publishes its own `SAVE_VERSION` as a small JSON asset
 (`scripts/build-release-meta.mjs`, uploaded by the `guard` job), the updater
 fetches it for the offered version, and the renderer compares it against its

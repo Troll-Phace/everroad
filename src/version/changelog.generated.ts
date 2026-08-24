@@ -59,9 +59,9 @@ export const CHANGELOG: readonly ChangelogRelease[] = [
       {
         heading: 'Added',
         items: [
-          '**Everroad updates itself.** The desktop app checks for a newer release when it starts, and tells you on the main menu when one is waiting. Open the notice to read what changed and download it without leaving the game. On Windows and on the Linux AppImage the update installs itself and Everroad restarts into it; on macOS, the portable Windows build and the Fedora RPM it lands in your Downloads folder for you to open, because those builds cannot replace themselves.',
-          '**A warning before an update that could cost you your journey.** Everroad is still finding its shape, and a release is occasionally allowed to change how saves are stored. When one does, the update notice says so before you download it, and tells you to copy your save code from Settings first.',
-          '**Updates in Settings.** A switch for the check on launch, a button to look now, and a line saying where the last check got to. The check is the only request Everroad makes of anything, and turning it off means it is not made.',
+          '**EverRoad updates itself.** The desktop app checks for a newer release when it starts, and tells you on the main menu when one is waiting. Open the notice to read what changed and download it without leaving the game. On Windows and on the Linux AppImage the update installs itself and EverRoad restarts into it; on macOS, the portable Windows build and the Fedora RPM it lands in your Downloads folder for you to open, because those builds cannot replace themselves.',
+          '**A warning before an update that could cost you your journey.** EverRoad is still finding its shape, and a release is occasionally allowed to change how saves are stored. When one does, the update notice says so before you download it, and tells you to copy your save code from Settings first.',
+          '**Updates in Settings.** A switch for the check on launch, a button to look now, and a line saying where the last check got to. The check is the only request EverRoad makes of anything, and turning it off means it is not made.',
         ],
       },
     ],
@@ -73,7 +73,7 @@ export const CHANGELOG: readonly ChangelogRelease[] = [
       {
         heading: 'Added',
         items: [
-          'Everroad now ships as a **desktop app**. Release builds are wrapped in Electron and published to GitHub Releases for macOS (Apple silicon and Intel), Windows (installer or portable) and Linux (AppImage, or an RPM for Fedora/RHEL). The browser build is unchanged and remains how the game is developed.',
+          'EverRoad now ships as a **desktop app**. Release builds are wrapped in Electron and published to GitHub Releases for macOS (Apple silicon and Intel), Windows (installer or portable) and Linux (AppImage, or an RPM for Fedora/RHEL). The browser build is unchanged and remains how the game is developed.',
           "**What's New** — a button in the top-right of the main menu opens the full patch notes, newest release expanded.",
           'The build number sits in the bottom corner of the main menu and the settings panel, so a bug report can always name the build it came from.',
           '**Quit to Desktop** in settings, shown only in the desktop app. The browser build still quits to the main menu, because a tab cannot close itself.',
@@ -313,7 +313,7 @@ export const CHANGELOG: readonly ChangelogRelease[] = [
       {
         heading: 'Added',
         items: [
-          '**The first playable build of Everroad.** A procedurally generated country highway that scrolls forever through painted biomes: driving, the road, chunk streaming, biomes, sky and day/night, weather, scenery and pickups.',
+          '**The first playable build of EverRoad.** A procedurally generated country highway that scrolls forever through painted biomes: driving, the road, chunk streaming, biomes, sky and day/night, weather, scenery and pickups.',
           'Economy, upgrades, the car catalog, prestige and achievements.',
           'A generative audio engine, the HUD and panel overlay, and a save system that keeps earning while you are away.',
         ],

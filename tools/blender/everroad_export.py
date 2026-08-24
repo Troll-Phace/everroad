@@ -1,5 +1,5 @@
 """
-Everroad exporter: Blender scene -> `<name>.evr.json`.
+EverRoad exporter: Blender scene -> `<name>.evr.json`.
 
 The `.evr.json` is a plain, readable intermediate — deduplicated vertices,
 triangle indices, one part per (object, material) pair. It is committed to the

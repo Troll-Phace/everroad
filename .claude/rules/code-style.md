@@ -4,7 +4,7 @@ paths:
   - "*.ts"
 ---
 
-# Code Standards — Everroad
+# Code Standards — EverRoad
 
 TypeScript in strict mode; `npm run typecheck` is the lint gate and stays
 clean. Prettier is applied per-file by the PostToolUse hook (single quotes,
@@ -30,7 +30,7 @@ interface from `types.ts`; that is the shape every module uses instead of
 classes. Exported functions and every tuning constant carry a doc comment
 saying what the number means and where its rationale lives.
 
-Everroad runs one `requestAnimationFrame` loop, so per-frame code is
+EverRoad runs one `requestAnimationFrame` loop, so per-frame code is
 performance-sensitive: allocate outside the loop, reuse `Vector3`/`Color`
 scratch objects, and prefer instanced meshes and pooling over creating scene
 objects per frame. `dt` is clamped in `main.ts` — hot paths take `dt` as an

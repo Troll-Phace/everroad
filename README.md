@@ -1,4 +1,4 @@
-# 🌄 Everroad
+# 🌄 EverRoad
 
 *An idle infinite driving game. Drive through a painted countryside forever.*
 
@@ -24,7 +24,7 @@ Then open the printed localhost URL.
 
 ## Desktop app
 
-Everroad also ships as a desktop app for macOS, Windows and Linux. Grab the
+EverRoad also ships as a desktop app for macOS, Windows and Linux. Grab the
 latest build from the
 [Releases page](https://github.com/Troll-Phace/everroad/releases).
 
@@ -33,10 +33,10 @@ certificate for this project — so the first launch needs a nudge:
 
 - **macOS** — right-click the app → **Open** → **Open**. After once, it opens normally.
 - **Windows** — SmartScreen shows "Windows protected your PC"; choose **More info** → **Run anyway**.
-- **Linux** — `chmod +x Everroad-*.AppImage`, then run it.
+- **Linux** — `chmod +x EverRoad-*.AppImage`, then run it.
 
 The desktop app is the same game as the web build, wrapped in Electron. **The
-browser is the primary way to run and develop Everroad**; `npm run dev` above is
+browser is the primary way to run and develop EverRoad**; `npm run dev` above is
 unaffected by any of the packaging.
 
 ## Build

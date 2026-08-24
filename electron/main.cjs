@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Everroad desktop — main process.
+ * EverRoad desktop — main process.
  *
  * The desktop app is a thin, hardened shell around the exact same web bundle
  * `npm run build` produces. It adds no game code and no game state: everything
@@ -36,7 +36,7 @@ const DEV_ORIGIN = 'http://localhost:5199';
  * real build, so an unpackaged launch does *not* imply the dev server; the
  * documented development workflow is still `npm run dev` in a browser.
  *
- * `!app.isPackaged` gates the whole thing. Without it, a shipped `Everroad.app`
+ * `!app.isPackaged` gates the whole thing. Without it, a shipped `EverRoad.app`
  * launched with `ELECTRON_DEV=1` in the environment would load whatever answers
  * on port 5199, under a CSP relaxed to allow inline script, and would then
  * treat that origin as its own content. An environment variable must not be
@@ -158,7 +158,7 @@ function createWindow() {
     // the window only on ready-to-show trades a moment of delay for never
     // flashing an empty frame.
     show: false,
-    title: 'Everroad',
+    title: 'EverRoad',
     webPreferences: {
       // Non-negotiable. The renderer is untrusted-by-construction: it runs a
       // large third-party render stack, and it must not be able to reach Node.
@@ -214,7 +214,7 @@ function createWindow() {
     // what makes a file:// load resolve.
     void win.loadFile(DIST_INDEX);
   } else {
-    console.error(`Everroad: no build found at ${DIST_INDEX}. Run \`npm run build\` first.`);
+    console.error(`EverRoad: no build found at ${DIST_INDEX}. Run \`npm run build\` first.`);
     void win.loadURL(
       'data:text/html,<body style="background:%232b1e4e;color:%23fff7ec;font:16px sans-serif;' +
         'display:grid;place-items:center;height:100vh;margin:0">No build found — run ' +

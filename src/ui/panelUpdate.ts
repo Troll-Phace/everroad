@@ -89,10 +89,10 @@ function saveBanner(status: UpdateStatus): HTMLElement | null {
 /** How the update lands, said plainly rather than implied by which button appears. */
 function deliveryNote(status: UpdateStatus): string {
   if (status.delivery === 'in-place') {
-    return 'Everroad will download the update and restart into the installer.';
+    return 'EverRoad will download the update and restart into the installer.';
   }
   return (
-    'This build cannot replace itself, so Everroad will download the update to your ' +
+    'This build cannot replace itself, so EverRoad will download the update to your ' +
     'Downloads folder and open it for you to install.'
   );
 }
@@ -140,12 +140,12 @@ function render(content: HTMLElement, status: UpdateStatus): void {
     } else if (status.phase === 'error') {
       content.append(el('p', 'update-lead', status.error ?? 'The update check failed.'));
     } else {
-      content.append(el('p', 'update-lead', 'Everroad is up to date.'));
+      content.append(el('p', 'update-lead', 'EverRoad is up to date.'));
     }
     return;
   }
 
-  content.append(el('h3', 'update-version', `Everroad v${status.version}`));
+  content.append(el('h3', 'update-version', `EverRoad v${status.version}`));
 
   const banner = saveBanner(status);
   if (banner) content.append(banner);
@@ -186,7 +186,7 @@ function render(content: HTMLElement, status: UpdateStatus): void {
       install.addEventListener('click', () => installUpdate());
       actions.append(install);
       content.append(
-        el('p', 'settings-note', 'Everroad will close, install the update, and reopen.'),
+        el('p', 'settings-note', 'EverRoad will close, install the update, and reopen.'),
       );
     } else {
       const show = el('button', 'btn btn-big is-primary', 'Show in Downloads');

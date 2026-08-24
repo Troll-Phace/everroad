@@ -1,4 +1,4 @@
-# Everroad — Design System
+# EverRoad — Design System
 
 The overlay's visual contract. Token values live in `src/style.css`; component
 recipes live in `src/ui/ui.css`. This document is the reference both are written
@@ -346,6 +346,6 @@ One breakpoint, `@media (max-width: 640px)`, which tightens HUD padding and
 reduces the corner groups so the road stays visible. The main menu restructures
 at the same breakpoint: the left-anchored column becomes a full-width bottom
 sheet with a vertical scrim, and the wordmark's letter-spacing tightens so
-EVERROAD still fits one line at phone width. Everroad renders on small
+EVERROAD still fits one line at phone width. EverRoad renders on small
 screens; it is not driven on them — touch controls are out of scope, so the
 mobile treatment optimizes for watching, not playing.

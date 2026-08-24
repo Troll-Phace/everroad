@@ -1,5 +1,5 @@
 /**
- * Everroad — sustained slow-driving tracker for the "Sunday Stroll" secret.
+ * EverRoad — sustained slow-driving tracker for the "Sunday Stroll" secret.
  *
  * Achievement checks run on a ~1 s cadence, so a raw instantaneous speed test
  * would always sample the 0-to-cruise ramp of a fresh game and hand out the

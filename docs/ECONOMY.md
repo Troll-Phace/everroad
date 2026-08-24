@@ -1,4 +1,4 @@
-# Everroad — Economy Design
+# EverRoad — Economy Design
 
 Implementation: `src/game/economy/` (`cars.ts`, `upgrades.ts`, `economy.ts`).
 All numbers below are the live constants; the simulation results at the bottom

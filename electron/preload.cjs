@@ -1,6 +1,6 @@
 // @ts-check
 /**
- * Everroad desktop — preload.
+ * EverRoad desktop — preload.
  *
  * The entire main <-> renderer surface. `contextBridge` copies a frozen object
  * onto `window.everroad`; nothing else crosses. In particular there is no

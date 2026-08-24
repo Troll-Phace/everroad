@@ -6,7 +6,7 @@
 #
 # BUILDS ARE UNSIGNED. There is no Apple Developer certificate and no Windows
 # code-signing certificate for this project, so macOS Gatekeeper will refuse
-# the first launch ("Everroad is damaged" / "cannot be opened") until the user
+# the first launch ("EverRoad is damaged" / "cannot be opened") until the user
 # right-clicks -> Open, and Windows SmartScreen will show "Windows protected
 # your PC" until they choose More info -> Run anyway. docs/RELEASING.md spells
 # out exactly what a user sees on each OS.
@@ -94,7 +94,7 @@ jobs:
             TAG="$EXPECTED"
             echo "::notice::Manual run — releasing ${TAG} from ${{ github.ref_name }}."
           fi
-          # Everroad is pre-1.0: every 0.x build is a prerelease.
+          # EverRoad is pre-1.0: every 0.x build is a prerelease.
           case "$VERSION" in
             0.*) PRERELEASE=true ;;
             *)   PRERELEASE=false ;;
@@ -140,7 +140,7 @@ jobs:
           else
             gh release create "$TAG" \
               --draft \
-              --title "Everroad $TAG" \
+              --title "EverRoad $TAG" \
               --notes-file RELEASE_NOTES.md
           fi
           # --clobber so a re-run of a failed release replaces it rather than

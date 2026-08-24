@@ -1,5 +1,5 @@
 /**
- * Everroad model encoder + validator.
+ * EverRoad model encoder + validator.
  *
  * Turns a `.evr.json` intermediate (the Blender exporter's output) into the
  * compact, quantised form that `src/world/models/generated.ts` carries.
