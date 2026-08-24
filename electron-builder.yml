@@ -70,18 +70,37 @@ win:
       arch: [x64]
 
 nsis:
+  # Both Windows targets produce an .exe for the same os/arch, so the shared
+  # artifactName above collapsed them onto ONE filename. electron-builder then
+  # uploaded the installer, re-uploaded the portable over it ("already exists
+  # on GitHub") and timed out, failing the whole release. Each Windows target
+  # needs its own name.
+  artifactName: ${productName}-${version}-${os}-${arch}-setup.${ext}
   oneClick: false
   allowToChangeInstallationDirectory: true
   perMachine: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
 
+portable:
+  artifactName: ${productName}-${version}-${os}-${arch}-portable.${ext}
+
 linux:
   icon: build/icon.png
   category: Game
   synopsis: An idle infinite driving game
+  # rpm and deb both REQUIRE a maintainer; AppImage alone does not, which is why
+  # this was absent while AppImage was the only target. Deliberately a GitHub
+  # noreply address: this string is embedded in public package metadata, so it
+  # should not be anyone's personal inbox.
+  maintainer: Troll-Phace <Troll-Phace@users.noreply.github.com>
   target:
+    # AppImage runs anywhere without installing and needs no package manager.
+    # rpm is the native install on Fedora/RHEL; building it needs rpmbuild on
+    # the runner, installed by the release workflow.
     - target: AppImage
+      arch: [x64]
+    - target: rpm
       arch: [x64]
 
 publish:

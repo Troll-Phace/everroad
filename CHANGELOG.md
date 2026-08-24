@@ -20,8 +20,10 @@ the generated module.
 ### Added
 
 - Everroad now ships as a **desktop app**. Release builds are wrapped in
-  Electron and published to GitHub Releases for macOS, Windows and Linux. The
-  browser build is unchanged and remains how the game is developed.
+  Electron and published to GitHub Releases for macOS (Apple silicon and Intel),
+  Windows (installer or portable) and Linux (AppImage, or an RPM for
+  Fedora/RHEL). The browser build is unchanged and remains how the game is
+  developed.
 - **What's New** — a button in the top-right of the main menu opens the full
   patch notes, newest release expanded.
 - The build number sits in the bottom corner of the main menu and the settings
