@@ -106,7 +106,11 @@ are load-bearing for `animateCar`:
 - A wheel spins about its mesh's **local Y**, because the procedural tyre is a
   cylinder turned 90° about Z. Handcrafted wheel geometry is counter-rotated
   into that same frame, so net orientation is unchanged and the spin axis is
-  the axle.
+  the axle. The 90° tilt is applied with Euler order **`ZYX`** (`axleFrame` in
+  `world/wheelFrame.ts`), which is the load-bearing half: with Three.js's
+  default `XYZ`, `rotation.y` composes as a turn about the *parent's* vertical
+  axis applied after the tilt, and the wheel yaws flat in the arch instead of
+  rolling. Both the tyre and its hub need it.
 - `wheelGroup.children` is `[tire, hub]`. A one-piece wheel gets an empty
   placeholder so the index stays valid.
 
@@ -228,6 +232,7 @@ asset returns to procedural with no other change.
 | `sits N m below y=0` | scenery bases at the origin; `chunks.ts` sinks it 0.12 m itself |
 | `expected 0 or 4 wheel parts` | wheels must be named `*_fl`, `*_fr`, `*_rl`, `*_rr` |
 | Wheel rolls sideways | the wheel's object origin is not on the axle |
+| Wheel yaws / swivels flat in the arch | the mesh's Euler order is not `ZYX` — use `axleFrame` |
 | Model is 90° out | authored in Blender space instead of through the kit |
 | `generated.ts is out of date` | run `npm run models` and commit the result |
 | Model looks flat/faceted | pass `smooth=True`; normals are derived, not exported |
