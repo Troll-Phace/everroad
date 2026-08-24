@@ -25,6 +25,7 @@ Then open the printed localhost URL.
 ## Build
 
 ```bash
+npm run verify    # typecheck + tests + build (what CI and the pre-push hook check)
 npm run build && npm run preview
 ```
 
@@ -34,6 +35,7 @@ npm run build && npm run preview
 - [Architecture](docs/ARCHITECTURE.md)
 - [Economy tuning](docs/ECONOMY.md)
 - [Achievements list](docs/ACHIEVEMENTS.md)
+- [Design system](docs/DESIGN_SYSTEM.md)
 - [Build log](docs/BUILDLOG.md)
 
 ## Stack

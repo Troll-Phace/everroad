@@ -1,0 +1,89 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Glob",
+      "Grep",
+      "Bash(git status)",
+      "Bash(git log *)",
+      "Bash(git diff *)",
+      "Bash(gh issue *)",
+      "Bash(gh label *)",
+      "Bash(gh api *)",
+      "Bash(gh pr *)",
+      "Bash(npm run build)",
+      "Bash(npm run typecheck)",
+      "Bash(npm run verify)",
+      "Bash(npm test *)",
+      "Bash(npm run test:*)",
+      "Bash(npm run format:check)",
+      "Bash(npx vitest run *)"
+    ],
+    "deny": [
+      "Bash(sudo *)",
+      "Bash(rm -rf /)",
+      "Bash(rm -rf /*)",
+      "Bash(: > *)",
+      "Bash(chmod 777 *)",
+      "Bash(git push --force *)",
+      "Bash(git push -f *)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "cat .claude/state/progress.md 2>/dev/null || echo 'No progress file yet.'",
+            "statusMessage": "Loading work progress..."
+          }
+        ]
+      },
+      {
+        "matcher": "startup|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "gh issue list --state open --search \"no:label\" --json number,title 2>/dev/null | jq -r '.[] | \"UNTRIAGED #\\(.number) \\(.title)\"' ; gh issue list --state open --label severity:critical --json number,title,milestone 2>/dev/null | jq -r '.[] | \"#\\(.number) [\\(.milestone.title // \"no tier\")] \\(.title)\"' ; gh issue list --state open --label severity:high --json number,title,milestone 2>/dev/null | jq -r '.[] | \"#\\(.number) [\\(.milestone.title // \"no tier\")] \\(.title)\"' | head -10 ; gh issue list --state open --limit 200 --json labels 2>/dev/null | jq -r '[.[].labels[].name | select(startswith(\"severity\"))] | group_by(.) | map(\"\\(.[0]): \\(length)\") | join(\"  \")' || echo 'gh unavailable'",
+            "statusMessage": "Loading backlog summary..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(cat /dev/stdin | jq -r '.tool_input.file_path // empty'); case \"$file\" in *.ts|*.css|*.html|*.json) npx --no-install prettier --write \"$file\" 2>/dev/null;; esac; exit 0",
+            "statusMessage": "Auto-formatting..."
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "file=$(cat /dev/stdin | jq -r '.tool_input.file_path // empty'); case \"$file\" in *.env*|*secret*|*credential*|*.lock|*-lock.*) echo \"Protected file: $file\" >&2; exit 2;; esac; exit 0"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo \"- $(date +'%Y-%m-%d %H:%M'): Session ended\" >> .claude/state/progress.md 2>/dev/null || true"
+          }
+        ]
+      }
+    ]
+  }
+}
