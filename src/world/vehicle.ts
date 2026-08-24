@@ -22,6 +22,13 @@ export class Vehicle {
   driftPeakCombo = 1;
   /** Visual-only yaw offset while drifting (radians). */
   private driftYaw = 0;
+  /**
+   * True world yaw of the car this frame. The camera must use this, never
+   * root.rotation.y — Euler XYZ decomposition clamps y to ±90°, which made
+   * the camera orbit to the car's front whenever the road heading wound past
+   * a quarter turn.
+   */
+  yaw = 0;
   private latVel = 0;
   private time = 0;
   rig: CarRig;
@@ -117,8 +124,9 @@ export class Vehicle {
     // ---- place mesh ----
     const pose = this.path.pose(this.s, poseScratch);
     const heading = pose.heading;
-    const nx = Math.cos(heading);
-    const nz = -Math.sin(heading);
+    // Same right-hand normal convention as RoadPath.point.
+    const nx = -Math.cos(heading);
+    const nz = Math.sin(heading);
     const y = pose.pos.y + hoverBob(this.rig, this.time);
     this.root.position.set(pose.pos.x + nx * this.lateral, y, pose.pos.z + nz * this.lateral);
 
@@ -129,8 +137,9 @@ export class Vehicle {
     const roll = THREE.MathUtils.clamp(-headingDelta * this.speedMps * 0.05, -0.12, 0.12)
       + (this.isDrifting ? -steer * 0.06 : 0);
 
+    this.yaw = heading + this.driftYaw + this.latVel * -0.012;
     this.root.rotation.set(0, 0, 0);
-    this.root.rotateY(heading + this.driftYaw + this.latVel * -0.012);
+    this.root.rotateY(this.yaw);
     this.root.rotateX(-pitch);
     this.root.rotateZ(roll);
 

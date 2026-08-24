@@ -108,9 +108,10 @@ export class RoadPath {
   point(s: number, lateral: number, out?: THREE.Vector3): THREE.Vector3 {
     const p = this.pose(s, this.scratch);
     const res = out ?? new THREE.Vector3();
-    // Right-hand normal of heading (heading measured from +Z toward +X).
-    const nx = Math.cos(p.heading);
-    const nz = -Math.sin(p.heading);
+    // Right-hand normal of heading: forward is (sin h, cos h), so the
+    // traveler's right is (-cos h, sin h).
+    const nx = -Math.cos(p.heading);
+    const nz = Math.sin(p.heading);
     res.set(p.pos.x + nx * lateral, p.pos.y, p.pos.z + nz * lateral);
     return res;
   }

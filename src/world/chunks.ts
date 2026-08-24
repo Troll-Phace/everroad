@@ -348,8 +348,9 @@ function gridIndices(rows: number, cols: number): THREE.BufferAttribute {
       const b = a + 1;
       const c = a + cols;
       const d = c + 1;
-      idx[k++] = a; idx[k++] = c; idx[k++] = b;
-      idx[k++] = b; idx[k++] = c; idx[k++] = d;
+      // Winding chosen so faces point up with the right-hand lateral axis.
+      idx[k++] = a; idx[k++] = b; idx[k++] = c;
+      idx[k++] = b; idx[k++] = d; idx[k++] = c;
     }
   }
   return new THREE.BufferAttribute(idx, 1);

@@ -9,7 +9,6 @@ export class ChaseCamera {
   readonly camera: THREE.PerspectiveCamera;
   private pos = new THREE.Vector3(0, 6, -12);
   private look = new THREE.Vector3();
-  private idleTime = 0;
 
   constructor(aspect: number) {
     this.camera = new THREE.PerspectiveCamera(58, aspect, 0.3, 9000);
@@ -17,24 +16,16 @@ export class ChaseCamera {
   }
 
   update(vehicle: Vehicle, dt: number): void {
-    this.idleTime = vehicle.isActive ? 0 : this.idleTime + dt;
     const car = vehicle.root;
 
-    // Base rig: behind + above, distance breathes slightly with speed.
+    // Fixed chase rig: always directly behind + above; distance breathes
+    // slightly with speed.
     const speedK = THREE.MathUtils.clamp(vehicle.speedMps / 55, 0, 1);
     const dist = 9.5 + speedK * 3.2;
     const height = 4.1 + speedK * 0.8;
 
-    // Cinematic idle sway: slow orbital drift once hands-off for a while.
-    const sway = THREE.MathUtils.clamp((this.idleTime - 8) / 14, 0, 1);
-    const swayAngle = sway * Math.sin(this.idleTime * 0.09) * 0.85;
-
-    const heading = car.rotation.y; // yaw applied first in vehicle
-    const back = new THREE.Vector3(
-      -Math.sin(heading + swayAngle),
-      0,
-      -Math.cos(heading + swayAngle),
-    );
+    const heading = vehicle.yaw; // true yaw (rotation.y is Euler-clamped)
+    const back = new THREE.Vector3(-Math.sin(heading), 0, -Math.cos(heading));
 
     const targetPos = tmpA
       .copy(car.position)
