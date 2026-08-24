@@ -22,8 +22,8 @@ export const CARS: CarDef[] = [
     tier: 0,
     style: {
       bodyType: 'compact',
-      bodyColor: '#d98e73',
-      accentColor: '#8a5a44',
+      bodyColor: '#bdb08c',
+      accentColor: '#6e685c',
       scale: 0.9,
     },
   },

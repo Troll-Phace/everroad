@@ -15,13 +15,21 @@ import {
 import { decodePart, modelTriangles, type EncodedModel } from './codec';
 import { buildProtoFromModel } from './sceneryModel';
 import { buildRigFromModel } from './carModel';
+import { carModel } from './registry';
+import { buildCar } from '../car';
+import { CARS, STARTER_CAR_ID } from '../../game/economy/cars';
 
-/** Unit box centred on (0, 0.5, 0): 8 vertices, 12 triangles. */
-function boxPart(overrides: Record<string, unknown> = {}) {
+/** Half-extents of a box part, as [min, max] per axis. */
+type Extents = { x: [number, number]; y: [number, number]; z: [number, number] };
+
+const UNIT_BOX: Extents = { x: [-0.5, 0.5], y: [0, 1], z: [-0.5, 0.5] };
+
+/** Box with 8 vertices and 12 triangles; the unit box is centred on (0, 0.5, 0). */
+function boxPart(overrides: Record<string, unknown> = {}, ext: Extents = UNIT_BOX) {
   const positions: number[][] = [];
-  for (const x of [-0.5, 0.5]) {
-    for (const y of [0, 1]) {
-      for (const z of [-0.5, 0.5]) positions.push([x, y, z]);
+  for (const x of ext.x) {
+    for (const y of ext.y) {
+      for (const z of ext.z) positions.push([x, y, z]);
     }
   }
   // Index layout: x*4 + y*2 + z
@@ -58,20 +66,28 @@ function sceneryDoc(parts: unknown[] = [boxPart()]) {
   };
 }
 
-function carDoc() {
+/** Extents of a tyre of `radius`, pivot-relative, with X as the axle. */
+function tyre(radius: number): Extents {
+  return { x: [-0.12, 0.12], y: [-radius, radius], z: [-radius, radius] };
+}
+
+function carDoc(wheelRadius = 0.34, modelledRadius = wheelRadius) {
   const wheels = (['fl', 'fr', 'rl', 'rr'] as const).map((suffix, i) =>
-    boxPart({
-      name: `wheel_${suffix}`,
-      role: 'wheel',
-      slot: 'tire',
-      pivot: [i < 2 ? -0.8 : 0.8, 0.34, i % 2 === 0 ? 1.2 : -1.2],
-    }),
+    boxPart(
+      {
+        name: `wheel_${suffix}`,
+        role: 'wheel',
+        slot: 'tire',
+        pivot: [i < 2 ? -0.8 : 0.8, wheelRadius, i % 2 === 0 ? 1.2 : -1.2],
+      },
+      tyre(modelledRadius),
+    ),
   );
   return {
     schema: 1,
     name: 'car.compact',
     profile: 'car',
-    meta: { bodyType: 'compact', wheelRadius: 0.34, scaleHint: 0.9 },
+    meta: { bodyType: 'compact', wheelRadius, scaleHint: 0.9 },
     parts: [boxPart({ name: 'chassis', slot: 'body' }), ...wheels],
   };
 }
@@ -312,6 +328,10 @@ describe('validation', () => {
     doc.parts.push(boxPart({ name: 'hub_xx', role: 'hub', slot: 'hub' }) as never);
     bad(doc, /no matching wheel/);
   });
+  it('rejects a tyre whose size disagrees with meta.wheelRadius', () =>
+    bad(carDoc(0.34, 0.42), /wheel spin would not match ground speed/));
+  it('accepts a tyre within tolerance of meta.wheelRadius', () =>
+    expect(() => validateModel(carDoc(0.34, 0.343))).not.toThrow());
   it('rejects hover pads on a wheeled body', () => {
     const doc = carDoc();
     doc.parts.push(boxPart({ name: 'pad_a', role: 'hoverPad', slot: 'pad' }) as never);
@@ -337,5 +357,24 @@ describe('validator stays in step with the game', () => {
 
   it('knows exactly the car body types types.ts defines', () => {
     expect([...VALIDATOR_CAR_BODY_TYPES].sort()).toEqual([...CAR_BODY_TYPES].sort());
+  });
+});
+
+describe('the shipped models', () => {
+  // Every other test in this file builds a synthetic document, so nothing else
+  // would notice if the generated map, the registry and the assembler stopped
+  // agreeing about what actually ships.
+  it('wires the handcrafted compact through to the starter car', () => {
+    const model = carModel('compact');
+    expect(model).not.toBeNull();
+    expect(model?.profile).toBe('car');
+
+    const starter = CARS.find((c) => c.id === STARTER_CAR_ID);
+    expect(starter?.style.bodyType).toBe('compact');
+
+    const rig = buildCar(starter!.style);
+    expect(rig.wheels).toHaveLength(4);
+    // meta.wheelRadius x CarStyle.scale — what animateCar divides speed by.
+    expect(rig.wheelRadius).toBeCloseTo(0.34 * starter!.style.scale, 6);
   });
 });
