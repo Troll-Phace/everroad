@@ -41,17 +41,27 @@ acceptance criteria for the item.
 
 ## Work rhythm
 
-Understand the item → plan (/phase-plan) → delegate → verify with
-`npm run verify` against the acceptance criteria → close review per
-rules/orchestrator.md → commit (/safe-commit), update progress.md, and run
+Understand the item → plan (/phase-plan) → **cut a branch** → delegate → verify
+with `npm run verify` against the acceptance criteria → live-browser test if
+the change is visible in the browser → close review per rules/orchestrator.md →
+commit (/safe-commit), push, and open a PR (/ship-pr) → wait for CI → merge the
+green PR to main yourself and delete the branch → update progress.md and run
 /triage-issues and /milestone-review — all without pausing for confirmation.
-Closing a passing item is your decision to make; ask only when criteria are
-failing or a finding is blocking and unresolvable.
+
+Nothing substantial is edited on main. Closing a passing item — including
+merging its PR once CI is green — is your decision to make; ask only when
+criteria are failing, CI is red for a reason you cannot fix, or a finding is
+blocking and unresolvable.
 
 ## Conventions
 
-Commits: `type(scope): description` using the conventional prefixes; reference
-issues with `Closes #NN` when the commit fully satisfies the issue's
-done-criteria, `Refs #NN` when it only touches the issue. Stage specific
-files. When you find a defect or debt you aren't fixing now, log it
-(/log-issue) before moving on.
+Branches: feat/{desc}, fix/{desc}, perf/{desc}, refactor/{desc}, docs/{desc},
+experiment/{desc}, cut from an up-to-date main. All implementation work happens
+on a branch and reaches main only through a CI-green PR — see the Git & the
+branch/PR flow section of rules/orchestrator.md.
+
+Commits: `type(scope): description` using the conventional prefixes, with
+`Refs #NN` for issues they touch. The PR body carries `Closes #NN` for issues
+the branch fully satisfies, so the merge closes them. Stage specific files.
+When you find a defect or debt you aren't fixing now, log it (/log-issue)
+before moving on.

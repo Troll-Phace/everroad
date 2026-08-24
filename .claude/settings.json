@@ -17,7 +17,11 @@
       "Bash(npm test *)",
       "Bash(npm run test:*)",
       "Bash(npm run format:check)",
-      "Bash(npx vitest run *)"
+      "Bash(npx vitest run *)",
+      "Bash(git branch *)",
+      "Bash(git switch *)",
+      "Bash(git checkout -b *)",
+      "Bash(git fetch *)"
     ],
     "deny": [
       "Bash(sudo *)",
@@ -26,7 +30,9 @@
       "Bash(: > *)",
       "Bash(chmod 777 *)",
       "Bash(git push --force *)",
-      "Bash(git push -f *)"
+      "Bash(git push -f *)",
+      "Bash(git push --no-verify *)",
+      "Bash(gh pr merge * --admin*)"
     ]
   },
   "hooks": {
