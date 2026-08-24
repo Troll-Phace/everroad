@@ -1,0 +1,142 @@
+import * as THREE from 'three';
+import type { EventBus } from '../types';
+import type { Input } from '../engine/input';
+import { RoadPath, ROAD_HALF_WIDTH } from './roadPath';
+import { buildCar, animateCar, hoverBob, type CarRig } from './car';
+import type { CarStyle } from '../types';
+
+const MPH_TO_MPS = 0.44704;
+/** How far onto the shoulder the car may wander. */
+const MAX_LATERAL = 6.6;
+
+/**
+ * The player's car: autopilot cruiser + manual steering + drift-lite.
+ * Lives at (s, lateral) on the RoadPath.
+ */
+export class Vehicle {
+  s = 5;
+  lateral = 0;
+  speedMps = 0;
+  isDrifting = false;
+  driftMiles = 0;
+  driftPeakCombo = 1;
+  /** Visual-only yaw offset while drifting (radians). */
+  private driftYaw = 0;
+  private latVel = 0;
+  private time = 0;
+  rig: CarRig;
+  readonly root = new THREE.Group();
+
+  constructor(
+    private path: RoadPath,
+    private input: Input,
+    private bus: EventBus,
+    /** Cruise speed in mph from the economy (car + upgrades). */
+    private getCruiseMph: () => number,
+    /** Current combo, read for drift bookkeeping. */
+    private getCombo: () => number,
+    initialStyle: CarStyle,
+  ) {
+    this.rig = buildCar(initialStyle);
+    this.root.add(this.rig.group);
+  }
+
+  get speedMph(): number {
+    return this.speedMps / MPH_TO_MPS;
+  }
+
+  get isActive(): boolean {
+    return this.input.isActive;
+  }
+
+  setStyle(style: CarStyle): void {
+    this.root.remove(this.rig.group);
+    this.rig = buildCar(style);
+    this.root.add(this.rig.group);
+  }
+
+  shiftOrigin(dx: number, dz: number): void {
+    // Path samples were shifted; root position is recomputed each frame from
+    // the path, so nothing to do here — kept for symmetry/clarity.
+    void dx;
+    void dz;
+  }
+
+  update(dt: number): void {
+    this.time += dt;
+    const active = this.input.isActive;
+    const cruise = this.getCruiseMph() * MPH_TO_MPS;
+
+    // ---- speed ----
+    let targetSpeed = cruise;
+    if (active) {
+      const th = this.input.throttle;
+      targetSpeed = cruise * (th > 0 ? 1 + 0.3 * th : 1 + 0.6 * th);
+    }
+    if (Math.abs(this.lateral) > ROAD_HALF_WIDTH + 0.6) targetSpeed *= 0.82; // shoulder rumble
+    const accel = targetSpeed > this.speedMps ? 6.5 : 10;
+    this.speedMps = THREE.MathUtils.damp(this.speedMps, targetSpeed, accel / Math.max(targetSpeed, 8), dt);
+
+    // ---- steering / lateral ----
+    const steer = this.input.steer;
+    const wantDrift = this.input.drift && active && Math.abs(steer) > 0 && this.speedMps > 13;
+    if (wantDrift && !this.isDrifting) {
+      this.isDrifting = true;
+      this.driftMiles = 0;
+      this.driftPeakCombo = this.getCombo();
+    } else if (!wantDrift && this.isDrifting) {
+      this.isDrifting = false;
+      if (this.driftMiles > 0.003) {
+        this.bus.emit('driftEnd', { miles: this.driftMiles, comboReached: this.driftPeakCombo });
+      }
+    }
+    if (this.isDrifting) {
+      this.driftMiles += (this.speedMps * dt) / 1609.34;
+      this.driftPeakCombo = Math.max(this.driftPeakCombo, this.getCombo());
+    }
+
+    if (active) {
+      const steerSpeed = (5.5 + this.speedMps * 0.16) * (this.isDrifting ? 1.55 : 1);
+      this.latVel = THREE.MathUtils.damp(this.latVel, steer * steerSpeed, 10, dt);
+    } else {
+      // Autopilot: gentle lane wander, mostly hugging the center.
+      const wander = Math.sin(this.s * 0.004 + 1.3) * 1.1 + Math.sin(this.s * 0.0013) * 0.6;
+      const target = THREE.MathUtils.clamp(wander, -2.2, 2.2);
+      this.latVel = THREE.MathUtils.damp(this.latVel, (target - this.lateral) * 0.9, 4, dt);
+    }
+    this.lateral = THREE.MathUtils.clamp(this.lateral + this.latVel * dt, -MAX_LATERAL, MAX_LATERAL);
+
+    // ---- advance along road ----
+    this.s += this.speedMps * dt;
+    this.path.ensure(this.s + 80);
+
+    // ---- drift visual yaw ----
+    const targetYaw = this.isDrifting ? -steer * 0.42 : 0;
+    this.driftYaw = THREE.MathUtils.damp(this.driftYaw, targetYaw, 8, dt);
+
+    // ---- place mesh ----
+    const pose = this.path.pose(this.s, poseScratch);
+    const heading = pose.heading;
+    const nx = Math.cos(heading);
+    const nz = -Math.sin(heading);
+    const y = pose.pos.y + hoverBob(this.rig, this.time);
+    this.root.position.set(pose.pos.x + nx * this.lateral, y, pose.pos.z + nz * this.lateral);
+
+    // Pitch from slope, roll from curvature + steering.
+    const ahead = this.path.pose(this.s + 3, poseScratch2);
+    const pitch = Math.atan2(ahead.pos.y - pose.pos.y, 3);
+    const headingDelta = ahead.heading - heading;
+    const roll = THREE.MathUtils.clamp(-headingDelta * this.speedMps * 0.05, -0.12, 0.12)
+      + (this.isDrifting ? -steer * 0.06 : 0);
+
+    this.root.rotation.set(0, 0, 0);
+    this.root.rotateY(heading + this.driftYaw + this.latVel * -0.012);
+    this.root.rotateX(-pitch);
+    this.root.rotateZ(roll);
+
+    animateCar(this.rig, this.speedMps, dt, this.time);
+  }
+}
+
+const poseScratch = { pos: new THREE.Vector3(), heading: 0 };
+const poseScratch2 = { pos: new THREE.Vector3(), heading: 0 };
