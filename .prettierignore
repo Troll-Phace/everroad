@@ -1,3 +1,5 @@
 dist/
 node_modules/
 package-lock.json
+assets/models/*.evr.json
+src/world/models/generated.ts

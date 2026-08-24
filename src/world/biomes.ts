@@ -8,21 +8,29 @@ import { BIOME_ORDER, type BiomeId } from '../types';
  */
 
 /** Scenery prototype kinds understood by scenery.ts. */
-export type SceneryKind =
-  | 'oak'
-  | 'maple'
-  | 'pine'
-  | 'poplar'
-  | 'cherryTree'
-  | 'rock'
-  | 'flowers'
-  | 'grassTuft'
-  | 'hay'
-  | 'fence'
-  | 'windmill'
-  | 'sunflowerPatch'
-  | 'lavenderRow'
-  | 'reeds';
+/**
+ * Every scenery kind, as a runtime list. The type derives from it so that
+ * anything iterating kinds (the model viewer, the model validator's drift
+ * test) cannot silently fall out of step with the union.
+ */
+export const SCENERY_KINDS = [
+  'oak',
+  'maple',
+  'pine',
+  'poplar',
+  'cherryTree',
+  'rock',
+  'flowers',
+  'grassTuft',
+  'hay',
+  'fence',
+  'windmill',
+  'sunflowerPatch',
+  'lavenderRow',
+  'reeds',
+] as const;
+
+export type SceneryKind = (typeof SCENERY_KINDS)[number];
 
 export interface BiomeVisual {
   id: BiomeId;

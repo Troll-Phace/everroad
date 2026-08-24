@@ -1,6 +1,20 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { toonMat } from './materials';
+import {
+  GLASS,
+  GLOW_COLOR,
+  GLOW_OPACITY,
+  HEAD_COLOR,
+  HEAD_EMISSIVE,
+  HUB,
+  PAD_COLOR,
+  PAD_OPACITY,
+  TAIL_COLOR,
+  TAIL_EMISSIVE,
+  TIRE,
+} from './carPalette';
+import { handcraftedCar } from './models/carModel';
 import type { CarStyle, CarBodyType } from '../types';
 
 /**
@@ -159,11 +173,17 @@ const BODIES: Record<CarBodyType, BodyParams> = {
   },
 };
 
-const GLASS = '#bfe8f0';
-const TIRE = '#2b2b33';
-const HUB = '#d8d8d8';
-
+/**
+ * Build the rig for a style. A Blender-authored rig replaces the procedural
+ * builder only for body types that have one; every other car stays procedural,
+ * which is the default. See docs/MODELS.md.
+ */
 export function buildCar(style: CarStyle): CarRig {
+  return handcraftedCar(style) ?? buildProceduralCar(style);
+}
+
+/** The procedural builder. Exported so the model viewer can compare against it. */
+export function buildProceduralCar(style: CarStyle): CarRig {
   const p = BODIES[style.bodyType];
   const g = new THREE.Group();
   const body = toonMat(style.bodyColor);
@@ -218,8 +238,8 @@ export function buildCar(style: CarStyle): CarRig {
   }
 
   // Lights
-  const head = toonMat('#fff6c9', { emissive: 0xfff2b0 });
-  const tail = toonMat('#ff5a4a', { emissive: 0xff3020 });
+  const head = toonMat(HEAD_COLOR, { emissive: HEAD_EMISSIVE });
+  const tail = toonMat(TAIL_COLOR, { emissive: TAIL_EMISSIVE });
   for (const side of [-1, 1]) {
     const h = new THREE.Mesh(new RoundedBoxGeometry(0.3, 0.16, 0.08, 1, 0.04), head);
     h.position.set(side * (p.wid / 2 - 0.32), p.chassisY + p.chassisH * 0.62, p.len / 2 + 0.01);
@@ -235,9 +255,9 @@ export function buildCar(style: CarStyle): CarRig {
   const ownedMaterials: THREE.Material[] = [];
   if (style.bodyType === 'hover') {
     const padMat = new THREE.MeshBasicMaterial({
-      color: 0x7ae8ff,
+      color: PAD_COLOR,
       transparent: true,
-      opacity: 0.65,
+      opacity: PAD_OPACITY,
       toneMapped: false,
     });
     ownedMaterials.push(padMat);
@@ -253,9 +273,9 @@ export function buildCar(style: CarStyle): CarRig {
       hoverPads.push(pad);
     }
     const glowMat = new THREE.MeshBasicMaterial({
-      color: 0x58d8ff,
+      color: GLOW_COLOR,
       transparent: true,
-      opacity: 0.4,
+      opacity: GLOW_OPACITY,
       toneMapped: false,
     });
     ownedMaterials.push(glowMat);
@@ -321,7 +341,10 @@ export function animateCar(rig: CarRig, speedMps: number, dt: number, time: numb
     // Tire cylinder was rotated z=90°, so forward rolling is local Y.
     // Angular rate is ground speed over the rig's real wheel radius.
     w.rotation.y -= (speedMps * dt) / rig.wheelRadius;
-    (w.userData.wheelGroup as THREE.Group).children[1].rotation.y = w.rotation.y;
+    // children[1] is the hub. Handcrafted rigs may model a wheel as one piece,
+    // in which case the slot holds a placeholder.
+    const hub = (w.userData.wheelGroup as THREE.Group).children[1];
+    if (hub) hub.rotation.y = w.rotation.y;
   }
   if (rig.hoverPads.length) {
     const bob = Math.sin(time * 3.1) * 0.05;

@@ -7,3 +7,9 @@ dist/
 # Claude Code local overrides and session state
 .claude/settings.local.json
 .claude/state/
+
+# Blender scratch — the recipe in assets/models/src/ is the source of truth,
+# and the .evr.json intermediate is the committed artifact. The .blend is not.
+*.blend
+*.blend[0-9]*
+__pycache__/

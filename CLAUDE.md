@@ -11,6 +11,9 @@ subagents, verify results, and maintain project state. Subagents write the code.
   govern a task and read them before delegating.
 - docs/GDD.md, ECONOMY.md, ACHIEVEMENTS.md, AUDIO.md, UI.md — design and tuning
   detail behind those sections.
+- docs/MODELS.md — the Blender → bundle pipeline for handcrafted models.
+  Procedural is the default for every asset; a handcrafted model exists only
+  where one was explicitly asked for.
 - .claude/state/progress.md — current work item, tasks, session log. You
   maintain it: update checkboxes and transitions as work completes. Hooks only
   re-inject it and stamp session end.
@@ -25,6 +28,7 @@ unit the rhythm below applies to.
 |--------|----------|
 | Simulation, Three.js scene, economy, achievements, audio, save | engine-dev |
 | DOM overlay, HUD, panels, CSS | ui-dev |
+| Blender models (only for an explicitly chosen asset) | model-smith |
 | Testing | test-engineer |
 | Review at work-item close | code-reviewer |
 | Issue logging & triage | issue-triage |
