@@ -242,3 +242,26 @@ export function pickScenery(s: number, rand: number): SceneryKind {
   }
   return 'grassTuft';
 }
+
+/**
+ * Fraction of a biome segment that is pure, before the crossfade into the
+ * next biome begins. `biomeAt` starts blending at this point in the segment.
+ */
+const PURE_FRAC = 1 - BLEND_LEN / BIOME_LEN;
+
+/**
+ * Path distance s (m) that lands `frac` (0..1) of the way through `id`'s
+ * segment — the inverse of `biomeAt`, used to seed attract mode into a chosen
+ * biome (docs/ARCHITECTURE.md §5.4).
+ *
+ * `frac` is clamped just below the crossfade zone (`PURE_FRAC`, ~0.807), so
+ * `biomeAt(sForBiome(id, f)).id === id` holds for every `f`. Values in roughly
+ * 0.15–0.7 sit comfortably clear of the `BLEND_LEN` crossfade at both ends of
+ * the segment, which is the range a caller wanting an unambiguously "in this
+ * biome" vantage should draw from.
+ */
+export function sForBiome(id: BiomeId, frac = 0.4): number {
+  const idx = BIOME_ORDER.indexOf(id);
+  const f = THREE.MathUtils.clamp(frac, 0, PURE_FRAC - 1e-6);
+  return (idx + f) * BIOME_LEN;
+}

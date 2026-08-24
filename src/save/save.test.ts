@@ -3,6 +3,7 @@ import {
   MAX_OFFLINE_SEC,
   clearSave,
   exportSave,
+  hasSave,
   importSave,
   loadGame,
   offlineSeconds,
@@ -753,5 +754,102 @@ describe('offlineSeconds', () => {
       expect(sec).toBeGreaterThanOrEqual(0);
       expect(sec).toBeLessThanOrEqual(MAX_OFFLINE_SEC);
     }
+  });
+
+  // The rule main.ts relies on (docs/ARCHITECTURE.md §4.1): the grant on
+  // Continue is measured to the instant the main menu was entered, never to
+  // "now", so the title screen can neither eat nor mint offline progress.
+  describe('measured to the menu-entry instant', () => {
+    const HOUR = 3600_000;
+
+    it('grants nothing for time spent sitting on the main menu after a quit', () => {
+      // quitToMenu saves (stamping lastSaveTime) and then enters the menu, so
+      // both instants coincide; the player then leaves the title screen up
+      // overnight before pressing Continue.
+      const quitAt = 1_700_000_000_000;
+      const menuEnteredMs = quitAt;
+      expect(offlineSeconds(stateAt(quitAt), menuEnteredMs)).toBe(0);
+      // Measuring to "now" instead is the bug: eight hours of free coins.
+      expect(offlineSeconds(stateAt(quitAt), quitAt + 8 * HOUR)).toBe(8 * 3600);
+    });
+
+    it('still grants the real time away at boot', () => {
+      const lastPlayed = 1_700_000_000_000;
+      const bootedAt = lastPlayed + 8 * HOUR;
+      // Twenty minutes of admiring the attract footage adds nothing.
+      const continuedAt = bootedAt + 20 * 60_000;
+      expect(offlineSeconds(stateAt(lastPlayed), bootedAt)).toBe(8 * 3600);
+      expect(offlineSeconds(stateAt(lastPlayed), bootedAt)).toBeLessThan(
+        offlineSeconds(stateAt(lastPlayed), continuedAt),
+      );
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// hasSave — the main menu's "is Continue worth offering" probe (§12)
+// ---------------------------------------------------------------------------
+
+describe('hasSave', () => {
+  it('is false when nothing is stored', () => {
+    expect(hasSave()).toBe(false);
+  });
+
+  it('is true for a save this build wrote', () => {
+    saveGame(defaultState());
+    expect(hasSave()).toBe(true);
+  });
+
+  it('is true for an older-version save, which loadGame migrates', () => {
+    store.map.set(
+      KEY,
+      craft((raw) => (raw.version = SAVE_VERSION - 1)),
+    );
+    expect(hasSave()).toBe(true);
+  });
+
+  it('is false for a save from a newer build, which loadGame refuses', () => {
+    store.map.set(
+      KEY,
+      craft((raw) => (raw.version = SAVE_VERSION + 1)),
+    );
+    expect(hasSave()).toBe(false);
+  });
+
+  it('is false for malformed JSON', () => {
+    store.map.set(KEY, '{not json');
+    expect(hasSave()).toBe(false);
+  });
+
+  it.each([['"a string"'], ['42'], ['null'], ['""']])('is false for non-object JSON %s', (raw) => {
+    store.map.set(KEY, raw);
+    expect(hasSave()).toBe(false);
+  });
+
+  it('is false when storage access throws', () => {
+    store.throwOnGet = new Error('denied');
+    expect(hasSave()).toBe(false);
+  });
+
+  it('is false after clearSave', () => {
+    saveGame(defaultState());
+    clearSave();
+    expect(hasSave()).toBe(false);
+  });
+
+  /**
+   * The whole reason hasSave is separate from loadGame: the menu may poll it
+   * freely, so it must never park a future save under the backup key (that
+   * would let a later clearSave + fresh autosave look like recovery happened).
+   */
+  it('writes nothing at all, not even the future-save backup', () => {
+    store.map.set(
+      KEY,
+      craft((raw) => (raw.version = SAVE_VERSION + 5)),
+    );
+    store.setCalls.length = 0;
+    expect(hasSave()).toBe(false);
+    expect(store.setCalls).toEqual([]);
+    expect(store.map.has(FUTURE_KEY)).toBe(false);
   });
 });

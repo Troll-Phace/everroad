@@ -68,6 +68,31 @@ export class RoadPath {
     }
   }
 
+  /**
+   * Re-seed the curve at path distance `s`, discarding every stored sample.
+   *
+   * Curvature and slope are pure functions of `s`, so the road built from here
+   * is the authentic road for that stretch; only its world-space origin moves
+   * (the new first sample sits at the origin heading +Z, exactly like a fresh
+   * path). Needed because `pose()` clamps to the retained window: teleporting
+   * the car *backwards* along the road — menu re-seed, or starting a journey
+   * at START_S after attract mode ran twenty kilometres out — would otherwise
+   * collapse every lookup onto samples[0].
+   *
+   * Callers must drop anything holding world positions or absolute s values in
+   * the same breath (ChunkManager.reset, Pickups.reset) — see main.ts.
+   *
+   * Ends by growing the second sample: `pose()` interpolates between a pair,
+   * so a one-sample buffer is a window in which any lookup at or below `s`
+   * would read past the end of the array (see the guard there).
+   */
+  reset(s: number): void {
+    this.samples.length = 0;
+    this.baseS = s;
+    this.samples.push({ x: 0, y: 0, z: 0, heading: 0 });
+    this.ensure(s + DS);
+  }
+
   /** Drop samples earlier than s (keep a small margin). */
   prune(s: number): void {
     const margin = 400;
@@ -92,12 +117,22 @@ export class RoadPath {
     out?: { pos: THREE.Vector3; heading: number },
   ): { pos: THREE.Vector3; heading: number } {
     this.ensure(s + DS);
+    const res = out ?? { pos: new THREE.Vector3(), heading: 0 };
+    // Below baseS, `ensure` grows nothing, so a one-sample buffer has no pair
+    // to interpolate and `samples[i + 1]` would be undefined. `reset` keeps a
+    // second sample for exactly this reason; a freshly constructed path is
+    // still one sample until something asks for road ahead of it.
+    if (this.samples.length < 2) {
+      const only = this.samples[0];
+      res.pos.set(only.x, only.y, only.z);
+      res.heading = only.heading;
+      return res;
+    }
     const f = (s - this.baseS) / DS;
     const i = THREE.MathUtils.clamp(Math.floor(f), 0, this.samples.length - 2);
     const t = THREE.MathUtils.clamp(f - i, 0, 1);
     const a = this.samples[i];
     const b = this.samples[i + 1];
-    const res = out ?? { pos: new THREE.Vector3(), heading: 0 };
     res.pos.set(
       THREE.MathUtils.lerp(a.x, b.x, t),
       THREE.MathUtils.lerp(a.y, b.y, t),

@@ -56,6 +56,26 @@ export function loadGame(): GameState | null {
   }
 }
 
+/**
+ * True when localStorage holds a save this build can load — used by the main
+ * menu to decide whether Continue is offered (docs/ARCHITECTURE.md §12).
+ *
+ * Deliberately side-effect free: unlike `loadGame`, it neither hydrates nor
+ * parks a refused future-version save under the `-future` backup key. Writing
+ * that backup stays `loadGame`'s job, so a menu poll cannot shuffle storage.
+ */
+export function hasSave(): boolean {
+  try {
+    const raw = localStorage.getItem(KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return false;
+    return !isFutureSave(parsed);
+  } catch {
+    return false;
+  }
+}
+
 export function clearSave(): void {
   localStorage.removeItem(KEY);
 }

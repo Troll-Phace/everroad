@@ -160,6 +160,7 @@ src/
     carPalette.ts      Fixed car tones shared by both car builders
     vehicle.ts         Car controller: autopilot, steering, drift
     camera.ts          Chase camera rig
+    menuCamera.ts      Attract-mode cinematic shot director (main menu)
     pickups.ts         Coins/relics, magnet, near-miss detection
     postfx.ts          EffectComposer: god rays, bloom, vignette, SMAA
 
@@ -273,23 +274,81 @@ convention in the codebase:
 
 ### 4.1 Boot
 
+The app boots into the **main menu**, not into play. Offline progress is *not*
+granted at boot — it is granted when the player presses Continue (see below).
+
 ```
 index.html → main.ts
   loadGame()                      localStorage -> GameState | null
   ?? defaultState()               fresh save
   migrate(state)                  version < SAVE_VERSION
-  offlineSeconds(state)           clamped to MAX_OFFLINE_SEC (14 days)
-  economy.idleRate(state)         coins/sec at the neutral baseline
-  grant offline coins             bus.emit('offlineSummary', {seconds, coins})
   build scene                     renderer, RoadPath, ChunkManager, Sky,
-                                  Weather, Pickups, Vehicle, ChaseCamera, PostFX
-  initUI(deps)                    HUD + panels mount over the canvas
-  first user gesture → audio.start()
+                                  Weather, Pickups, Vehicle, ChaseCamera,
+                                  MenuCamera, PostFX
+  initUI(deps)                    menu + HUD + panels mount over the canvas
+  enterMenu()                     appMode='menu'; seeds the attract scene
   requestAnimationFrame loop
-  loading-screen.done             fades out over 1.2 s
+  loading-screen.done             fades out over 1.2 s onto the menu
+  first user gesture → audio.start()   (a menu button click is that gesture)
 ```
 
+**Attract mode (`appMode === 'menu'`).** `enterMenu()` re-rolls the scene every
+time it is entered: a random `CarDef` from the whole catalog (its `style` *and*
+its `baseSpeed`, latched into `menuCruiseMph` so the showreel car drives at its
+own speed rather than the player's), a random biome via `sForBiome`, and a
+randomised time of day weighted toward flattering light. The world is seeded
+before the first rendered frame, so the loading screen lifts onto the correct
+biome rather than flashing the meadow.
+
+The whole world runs — sim, chunks, sky, weather, audio, pickup animation — but
+**nothing persistent moves**: the economy tick, achievement checks,
+`updateSlowDrive`, the `dt > 0.5` idle-banking branch, every `state.stats` /
+`state.currencies` write, autosave, and the `beforeunload` /
+`visibilitychange` writes are all gated on `appMode === 'playing'`. `Pickups`
+still updates so coins glint on the road, but its payout callbacks early-return.
+`runtime.paused` rides with menu mode so scene-sampled secrets cannot unlock.
+
+**Leaving and re-entering.**
+
+```
+startGame('continue')             grant offline coins, sessionCount += 1
+startGame('new')                  clearSave(); newJourneyState(state.settings)
+  seedWorldAt(START_S)            path/chunks/pickups reset, vehicle.resetTo
+  chase.snapTo(vehicle)           no lerp in from the cinematic pose
+  appMode='playing'               bus.emit('appModeChange')
+quitToMenu()                      saveGame(state), then enterMenu()
+```
+
+Both are **synchronous** world resets. All transition timing belongs to the UI,
+which fades to black, calls the action, and fades back in (§11).
+
+**The offline window is measured to menu entry, not to now.** `quitToMenu()`
+saves, which stamps `lastSaveTime`; if the grant measured to `Date.now()` the
+player would be paid for time spent sitting on the title screen. `main.ts`
+latches `menuEnteredMs` in `enterMenu()` and grants
+`save.offlineSeconds(state, menuEnteredMs)`. Menu time is therefore neither
+credited nor eaten — after a quit the gap is 0, and at boot it is the true
+away time.
+
+**Backwards teleport.** `RoadPath.pose()` reads a retained sample window, so
+jumping from attract mode (s ≈ 20 km) back to `START_S` collapsed every lookup
+onto `samples[0]`. `seedWorldAt(s)` re-seeds the path `RESEED_MARGIN` behind the
+car and resets chunks and pickups, so the retained chunks still build from real
+samples. Any future system that caches world coordinates must reset here too.
+
 ### 4.2 The frame loop (`main.ts`)
+
+One loop serves both modes. In `menu` mode everything below still runs *except*
+the economy tick, achievement checks, `updateSlowDrive`, the idle-banking
+branch, autosave, and every stat write; the active camera rig is `MenuCamera`
+rather than `ChaseCamera`. Those gates are the safety property the whole attract
+mode rests on — a new `state` write added to this loop must be gated with them
+(§4.1).
+
+The active camera rig updates **before** `weather.update`, which reads the
+camera position: the rebase block writes `camera.position` from the chase rig's
+pose, and in menu mode that pose is stale, so a weather read taken before the
+menu camera has run re-anchored particles kilometres away for one frame.
 
 ```
 requestAnimationFrame:
@@ -685,6 +744,27 @@ Swapping cars rebuilds the rig. Anything holding a reference into the old rig
 orbiting (`rotation.y` set directly rather than through Euler clamping — the
 Euler approach was a bug, commit `2a3856d`). There is deliberately no idle sway.
 Camera damping is `dt`-driven, so it stays stable through frame-rate changes.
+`snapTo(vehicle)` hard-sets the rig to its steady-state pose with no damping,
+and is what makes leaving the menu read as a cut rather than a swoop.
+
+**`MenuCamera` (`world/menuCamera.ts`)** is the attract-mode shot director. It
+drives the *same* `PerspectiveCamera` instance `ChaseCamera` owns — `PostFX`
+captures one camera reference at construction, so a second camera would never
+be rendered. Eight shots (low chase, drone fly-by, camera-car tracking, crane
+reveal, overtake, roadside static, hero low-front, orbit) each declare their own
+duration (7–11 s) and focal length; cuts are hard, never repeat back-to-back,
+and draw uniformly over the rest.
+
+Shots are composed in the **road frame** — an `s` offset along the curve, a
+lateral offset, and a height above the road surface — never as world positions.
+That makes height follow the road's own elevation and makes latched vantages
+rebase-invariant for free (§5.2). Every shot is then clamped to
+`MIN_TERRAIN_CLEARANCE` above `terrainMeshHeight` (§5.3 — the terrain *as
+drawn*, the same query scenery grounds to), probed at several points along the
+sight line so the eye lifts over an intervening ridge instead of punching
+through it. The lift applies immediately and only its release is damped, so the
+camera never clips and never snaps down off a crest. It clamps rather than
+repositions: low shots still skim.
 
 ---
 
@@ -916,6 +996,25 @@ Plain TypeScript and DOM inside `#ui-root`, which is `position: fixed; inset: 0;
 pointer-events: none`. Interactive surfaces opt back in with `pointer-events:
 auto`. No framework, no Three.js import.
 
+**Main menu (`ui/mainMenu.ts`).** The title screen shown while
+`runtime.appMode === 'menu'`, over live attract footage (§4.1). Continue (with a
+`SaveSummary` line, disabled with a stated reason when `hasSave()` is false),
+New Journey (arm-and-confirm when it would erase a save), and Settings, which
+opens the existing panel. Because the background is the moving world and not a
+fixed colour, legibility is structural — a directional scrim over the text
+column, glass under the buttons, text shadow on the free-standing lines — and
+never an assumption that the sky is dark.
+
+**Mode transitions (`ui/transition.ts`).** The UI owns *all* transition timing.
+`UIActions.startGame` / `quitToMenu` are synchronous world resets; the fade
+cover goes opaque, calls the action, then fades back, which is what hides the
+car swap and the world reset. The cover takes `pointer-events` for the whole run
+and exposes `busy` so keyboard paths cannot double-fire it.
+
+Gameplay furniture — HUD, toasts, biome banner, prestige flash, the offline
+modal — is hidden on `body[data-appmode='menu']`, and the offline modal is
+dismissed outright on the way out so it cannot outlive its session.
+
 ### 11.1 HUD
 
 | Corner | Contents |
@@ -967,7 +1066,14 @@ after 4.5 s.
 Implementation: `src/save/save.ts`.
 
 - **Key**: `localStorage["everroad-save-v1"]`, holding a JSON `GameState`.
-- **Autosave**: every 5 seconds during play, and on tab close.
+- **`hasSave()`**: whether the stored save parses and is not a refused
+  future-version save. Deliberately side-effect free — unlike `loadGame` it
+  neither hydrates nor writes the `-future` backup key — because the main menu
+  calls it to decide whether Continue is offered, and a menu poll must not
+  shuffle storage.
+- **Autosave**: every 5 seconds during play, and on tab close. Gated on
+  `appMode === 'playing'` — a menu-mode write would stamp `lastSaveTime` and
+  silently eat the player's offline progress (§4.1).
 - **Export**: `EVR1.` + base64(JSON). `importSave` validates the prefix and the
   decoded shape and returns `null` on anything malformed — the UI shows an
   inline error rather than throwing.
@@ -1043,17 +1149,23 @@ prestige count, tokens earned, play time, offline coins, top speed, sessions.
 timePhase, weatherId }` in, `TickResult { coinsEarned }` out;
 `PrestigePreview` for the panel.
 
-**Event bus** — `GameEvents` declares fourteen typed events: `achievement`,
+**App shell** — `AppMode` (`'menu' | 'playing'`) on `runtime.appMode`, and
+`SaveSummary` (journey/lifetime miles, coins, resolved `carName`,
+`prestigeCount`, `lastSaveTime`) for the menu's Continue line.
+
+**Event bus** — `GameEvents` declares fifteen typed events: `achievement`,
 `pickup`, `purchase`, `carSelected`, `prestige`, `biomeChange`,
 `weatherChange`, `phaseChange`, `offlineSummary`, `driftEnd`, `nearMiss`,
-`toast`, `saveExported`, `uiPanelChange`. `EventBus.on` returns its own
+`toast`, `saveExported`, `uiPanelChange`, `appModeChange`. `EventBus.on` returns its own
 unsubscribe function; anything that subscribes and can be torn down must call
 it.
 
 **UI** — `UIDeps { state, runtime, catalogs, actions, bus }` and `UIActions`
 (buy/select car, buy upgrade, buy global, cost getters, prestige preview and
-commit, export/import/reset save, audio and quality setters, `getCarSpeed`).
-Note that `UIActions` has no volume setters: the settings panel mutates
+commit, export/import/reset save, audio and quality setters, `getCarSpeed`,
+plus the app-shell four: `hasSave`, `getSaveSummary`, `startGame('continue' |
+'new')` and `quitToMenu`). The last two are synchronous world resets — the UI
+owns the fade around them. Note that `UIActions` has no volume setters: the settings panel mutates
 `state.settings.musicVolume` and `sfxVolume` directly and the audio engine reads
 them live.
 

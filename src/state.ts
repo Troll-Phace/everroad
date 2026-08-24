@@ -1,4 +1,10 @@
-import { SAVE_VERSION, type GameState, type GameStats, type RuntimeState } from './types';
+import {
+  SAVE_VERSION,
+  type GameSettings,
+  type GameState,
+  type GameStats,
+  type RuntimeState,
+} from './types';
 
 export function defaultStats(): GameStats {
   return {
@@ -58,6 +64,24 @@ export function defaultState(): GameState {
   };
 }
 
+/**
+ * State for a brand-new journey started from the main menu, carrying the
+ * player's settings across unchanged.
+ *
+ * "New Journey" erases the *journey*, not the person playing it: a low-end
+ * machine that was put on `quality: 'low'` with the music down stays there.
+ * Only "Erase EVERYTHING" (UIActions.resetSave) goes back to `defaultState()`
+ * whole, settings included.
+ *
+ * The settings are copied, not aliased, so the fresh state never shares an
+ * object with the one it replaces.
+ */
+export function newJourneyState(settings: GameSettings): GameState {
+  const next = defaultState();
+  next.settings = { ...settings };
+  return next;
+}
+
 export function defaultRuntime(): RuntimeState {
   return {
     speedMph: 0,
@@ -73,6 +97,9 @@ export function defaultRuntime(): RuntimeState {
     weatherId: 'clear',
     coinRate: 0,
     fps: 60,
-    paused: false,
+    // The world boots straight into attract mode behind the main menu; the
+    // paused flag rides with it so scene-sampled secrets cannot unlock there.
+    paused: true,
+    appMode: 'menu',
   };
 }
