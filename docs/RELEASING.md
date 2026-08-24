@@ -239,6 +239,30 @@ knowingly, from `main`, and check `gh release view` before you publish.
 
 ---
 
+## What a release does to installs already out there
+
+Since the auto-updater landed (ARCHITECTURE.md §16.8), publishing a release is
+no longer only an offer to new downloaders — every desktop install that starts
+up will see it within one launch. Two things follow.
+
+**The repository has to be public.** The updater reads the releases Atom feed
+and the release assets anonymously, because a shipped client cannot carry a
+token. If the repository is private, every install reports "Could not reach the
+update server" and no one is ever offered anything. Nothing else about the
+release changes; the check is simply dead.
+
+**A release that moves the save format has to say so.** The `guard` job runs
+`scripts/build-release-meta.mjs` and uploads `release-meta.json`, which carries
+the release's `SAVE_VERSION` read straight out of `src/types.ts`. Older builds
+fetch it and warn the player before they download. That works on its own — but
+it only says what the constant says, so if a release changes the save shape
+*without* bumping `SAVE_VERSION`, the warning stays silent and players lose
+journeys. Bump the constant in the same commit as the change to the shape.
+
+A draft release is not visible in the Atom feed, so a release that fails midway
+and leaves a draft behind offers nothing to anyone. That is the intended
+behaviour, and it is why the workflow drafts first and publishes last.
+
 ## Unsigned builds: what a user sees
 
 Everroad has no Apple Developer certificate and no Windows code-signing

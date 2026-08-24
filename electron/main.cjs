@@ -5,12 +5,13 @@
  * The desktop app is a thin, hardened shell around the exact same web bundle
  * `npm run build` produces. It adds no game code and no game state: everything
  * the renderer can ask of it goes through `window.everroad` (see preload.cjs),
- * and that surface is three fields wide on purpose.
+ * and that surface grows one named method at a time, on purpose.
  *
  * The browser remains the development target. `npm run dev` is untouched by any
  * of this — see docs/ARCHITECTURE.md §16.
  */
 const { app, BrowserWindow, Menu, session, ipcMain } = require('electron');
+const { initUpdater } = require('./updater.cjs');
 const path = require('node:path');
 const fs = require('node:fs');
 const { pathToFileURL } = require('node:url');
@@ -185,8 +186,14 @@ function createWindow() {
   // The game has no `window.open`, no anchor and no `target="_blank"`, so an
   // `shell.openExternal` here could only ever be reached by something that
   // was not us — which makes it a way to launch an attacker-chosen URL in the
-  // user's browser, and nothing else. Reinstate it against an explicit
-  // allowlist of hosts on the day the game grows a real outbound link.
+  // user's browser, and nothing else.
+  //
+  // The app does now have one real outbound link — the release page the updater
+  // offers — and it deliberately does not go through this handler. It is opened
+  // by `updater.cjs`, from a URL that module builds out of its own constants,
+  // reached by an IPC channel that takes no argument. That keeps the number of
+  // renderer-supplied strings that can become a browser navigation at zero,
+  // which a host allowlist here would not.
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
 
   // The page is a single document; it has no reason to navigate anywhere.
@@ -270,26 +277,69 @@ function buildMenu() {
 }
 
 /**
- * The renderer's only outbound call. Validated rather than trusted: a quit
- * request is only honoured from the top frame of a window we created, showing
- * content we recognise. A message from anywhere else is dropped silently.
+ * The gate every inbound IPC message passes. Validated rather than trusted: a
+ * request is only honoured from the top frame of the window we created, showing
+ * content we recognise. Anything else is dropped silently.
+ *
+ * Factored out of the quit handler when the updater channels arrived — the
+ * failure mode of a *second* channel written to a *slightly different* standard
+ * is exactly the one nobody notices, so there is one predicate and every
+ * handler starts with it.
  */
-ipcMain.on('everroad:quit', (event) => {
+function fromTrustedRenderer(event) {
   const win = BrowserWindow.fromWebContents(event.sender);
-  if (!win || win !== mainWindow) return;
+  if (!win || win !== mainWindow) return false;
   let frameUrl = '';
   try {
     const frame = event.senderFrame;
-    // A subframe asking to quit the app is exactly the case to refuse.
-    if (!frame || frame.parent !== null) return;
+    // A subframe asking to drive the application is exactly the case to refuse.
+    if (!frame || frame.parent !== null) return false;
     frameUrl = frame.url;
   } catch {
     // The frame went away between send and handle; nothing to honour.
-    return;
+    return false;
   }
-  if (!isOwnContent(frameUrl)) return;
+  return isOwnContent(frameUrl);
+}
+
+ipcMain.on('everroad:quit', (event) => {
+  if (!fromTrustedRenderer(event)) return;
   app.quit();
 });
+
+/**
+ * The updater, and the four verbs the renderer may aim at it.
+ *
+ * Note what is *not* here: no channel takes an argument. The renderer can ask
+ * for a check, a download, an install, a reveal or the release page, and every
+ * one of those acts on state this process derived from the feed itself. There
+ * is no URL, no path and no version to pass, so there is nothing for a
+ * compromised page to steer. See §16.8.
+ */
+const updater = initUpdater((status) => {
+  // The window can be gone mid-download; a status push is never worth a throw.
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('everroad:update-status', status);
+  }
+});
+
+/** Pull, for the renderer's first paint — the push channel only carries changes. */
+ipcMain.handle('everroad:update-status', (event) =>
+  fromTrustedRenderer(event) ? updater.snapshot() : null,
+);
+
+for (const [channel, run] of [
+  ['everroad:update-check', () => updater.check()],
+  ['everroad:update-download', () => updater.download()],
+  ['everroad:update-install', () => updater.install()],
+  ['everroad:update-reveal', () => updater.reveal()],
+  ['everroad:update-open-page', () => updater.openReleasePage()],
+]) {
+  ipcMain.on(channel, (event) => {
+    if (!fromTrustedRenderer(event)) return;
+    void run();
+  });
+}
 
 // A second instance would fight the first over the same localStorage profile.
 if (!app.requestSingleInstanceLock()) {

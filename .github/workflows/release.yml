@@ -111,6 +111,13 @@ jobs:
         shell: bash
         run: node scripts/release-notes.mjs "${{ steps.resolve.outputs.version }}" > RELEASE_NOTES.md
 
+      # The one thing the electron-builder feed cannot say: which save format
+      # this release uses. An older build fetches this asset before it offers
+      # the update, so it can warn when the journey may not survive. See
+      # scripts/build-release-meta.mjs.
+      - name: Build the release metadata
+        run: node scripts/build-release-meta.mjs
+
       - name: Create or update the draft release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -136,6 +143,9 @@ jobs:
               --title "Everroad $TAG" \
               --notes-file RELEASE_NOTES.md
           fi
+          # --clobber so a re-run of a failed release replaces it rather than
+          # failing on "already exists".
+          gh release upload "$TAG" release-meta.json --clobber
 
       - name: Keep the notes for the finalize step
         uses: actions/upload-artifact@v4

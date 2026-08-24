@@ -18,6 +18,7 @@ import { createBuildBadge } from './buildBadge';
 import { el, textUpdater } from './dom';
 import { CURRENCY_ICONS } from './icons';
 import { hasUnseenRelease, markSeen } from './panelWhatsNew';
+import { onUpdateStatus, current as updateState, updateOffered, saveImpact } from './update';
 import type { ModeTransition } from './transition';
 
 /**
@@ -53,6 +54,8 @@ export interface MainMenuOptions {
   openSettings(): void;
   /** Opens the What's New panel over the menu. */
   openWhatsNew(): void;
+  /** Opens the Update panel over the menu. */
+  openUpdate(): void;
 }
 
 interface MenuButton {
@@ -105,6 +108,24 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
     '↑ ↓ choose  ·  Enter start  ·  Esc settings  ·  N what\u2019s new  ·  M mute',
   );
 
+  // ---- update notice ------------------------------------------------------
+  // Sits above the action column rather than in a corner, because unlike
+  // What's New it is not always there: a notice the player has to go looking
+  // for is a notice that goes unread until the next release replaces it.
+  //
+  // Deliberately kept out of `buttons` below. The Up/Down cycle is the three
+  // centre slabs, and arrowing into a row that only exists sometimes would make
+  // the keyboard order change shape between launches.
+  const notice = el('button', 'btn panel-glass menu-update hidden');
+  notice.type = 'button';
+  const noticeDot = el('span', 'menu-update-dot');
+  noticeDot.setAttribute('aria-hidden', 'true');
+  const noticeBody = el('span', 'menu-update-body');
+  const noticeLabel = el('span', 'menu-update-label');
+  const noticeSub = el('span', 'menu-update-sub');
+  noticeBody.append(noticeLabel, noticeSub);
+  notice.append(noticeDot, noticeBody);
+
   // ---- corner furniture ---------------------------------------------------
   // Both of these live inside `inner`, not on `layer`, so the `inert` attribute
   // set on `inner` while a panel is open covers them with the action column.
@@ -120,7 +141,7 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
 
   const build = createBuildBadge('menu-build mono');
 
-  inner.append(brand, actionList, footer, whatsNew, build);
+  inner.append(brand, notice, actionList, footer, whatsNew, build);
   layer.append(scrim, inner);
   root.append(layer);
 
@@ -133,6 +154,8 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
   const setContSub = textUpdater(cont.sub);
   const setContMeta = textUpdater(cont.meta);
   const setFreshSub = textUpdater(fresh.sub);
+  const setNoticeLabel = textUpdater(noticeLabel);
+  const setNoticeSub = textUpdater(noticeSub);
 
   /** "2h 14m ago" / "just now" from an epoch-ms timestamp. */
   function relativeTime(epochMs: number): string {
@@ -192,6 +215,37 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
     // Purely an affordance: the dot says there is something unread, the button
     // says what it is. Nothing is communicated by the dot alone.
     newDot.classList.toggle('hidden', !hasUnseenRelease());
+    refreshUpdate();
+  }
+
+  /**
+   * Show or hide the update row for the updater's current state.
+   *
+   * Only two phases are worth interrupting the title screen for: an update
+   * found, and one already downloaded and waiting. A check in flight says
+   * nothing yet, and a failed check is a Settings concern — putting either on
+   * the menu would make the row flicker on every launch.
+   */
+  function refreshUpdate(): void {
+    const status = updateState();
+    const show = updateOffered(status);
+    notice.classList.toggle('hidden', !show);
+    if (!show) return;
+    const ready = status.phase === 'ready';
+    setNoticeLabel(
+      ready ? `v${status.version} is ready to install` : `Everroad v${status.version} is available`,
+    );
+    setNoticeSub(
+      ready
+        ? 'Open to finish the update'
+        : saveImpact(status) === 'breaking'
+          ? 'Changes the save format \u2014 read this before updating'
+          : 'See what changed and download it',
+    );
+    // The warning tint is the only thing on the menu that is not the biome
+    // accent, and it is reserved for the one case that can cost the player
+    // their journey.
+    notice.classList.toggle('is-warning', saveImpact(status) === 'breaking');
   }
 
   /** Only the relative time drifts while the menu sits open. */
@@ -225,6 +279,17 @@ export function initMainMenu(deps: UIDeps, root: HTMLElement, opts: MainMenuOpti
     markSeen();
     newDot.classList.add('hidden');
     opts.openWhatsNew();
+  });
+
+  notice.addEventListener('click', () => {
+    if (transition.busy) return;
+    opts.openUpdate();
+  });
+
+  // The updater reports asynchronously and usually lands while the menu is
+  // already up, so the row cannot wait for the next `refresh()`.
+  onUpdateStatus(() => {
+    if (visible) refreshUpdate();
   });
 
   // ---- keyboard -----------------------------------------------------------

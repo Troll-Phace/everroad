@@ -1373,6 +1373,162 @@ body[data-appmode='menu'][data-panel] .menu-inner {
   opacity: 0.12;
 }
 
+/* ---------- update notice (main menu) ---------- */
+
+/* The one row on the menu that is not always there. It sits in the column flow
+   above the action slabs rather than in a corner: a notice the player has to
+   go looking for is one that goes unread until the next release replaces it.
+   Sized deliberately smaller than a .menu-btn so it reads as an interruption
+   to the menu, not a fourth thing to choose between. */
+.menu-update {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  width: min(30rem, 100%);
+  margin-bottom: 1rem;
+  padding: 0.7em 1em;
+  text-align: left;
+  background: var(--glass-bg-strong);
+  border-radius: var(--radius);
+}
+.menu-update:hover:not(:disabled) {
+  background: linear-gradient(90deg, var(--accent-soft), transparent 85%), var(--glass-bg-strong);
+  border-color: var(--accent);
+  box-shadow: 0 0 18px var(--accent-soft);
+}
+.menu-update:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  box-shadow:
+    0 0 0 5px rgba(var(--scrim-rgb), 0.8),
+    0 0 24px var(--accent-soft);
+}
+
+.menu-update-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 0 10px var(--accent);
+}
+
+.menu-update-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+  min-width: 0;
+}
+.menu-update-label {
+  font-size: 0.86rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.menu-update-sub {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+/* The save-breaking case is the only thing on this screen that opts out of the
+   biome accent. The accent is retinted per biome and can land anywhere on the
+   wheel, so "this may cost you your journey" cannot be said in it — the warning
+   has to be the same color over a dawn desert as over a midnight pine forest. */
+.menu-update.is-warning .menu-update-dot {
+  background: #ffb4a2;
+  box-shadow: 0 0 10px #ffb4a2;
+}
+.menu-update.is-warning:hover:not(:disabled) {
+  background:
+    linear-gradient(90deg, rgba(255, 180, 162, 0.22), transparent 85%), var(--glass-bg-strong);
+  border-color: #ffb4a2;
+  box-shadow: 0 0 18px rgba(255, 180, 162, 0.3);
+}
+
+/* ---------- update panel ---------- */
+
+.update-current {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.update-version {
+  margin: 0.35rem 0 0.7rem;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.update-lead {
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text-main);
+}
+
+/* Same reasoning as .menu-update.is-warning: fixed hues, because the panel is
+   translucent over a world whose color the accent already follows. */
+.update-banner {
+  margin: 0.6rem 0 0.9rem;
+  padding: 0.7rem 0.85rem;
+  border-radius: var(--radius);
+  border: 1px solid rgba(255, 180, 162, 0.5);
+  background: rgba(255, 180, 162, 0.12);
+}
+.update-banner-unknown {
+  border-color: rgba(255, 255, 255, 0.22);
+  background: rgba(255, 255, 255, 0.06);
+}
+.update-banner-title {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: #ffd7ce;
+  margin-bottom: 0.35rem;
+}
+.update-banner-unknown .update-banner-title {
+  color: var(--text-main);
+}
+.update-banner-body {
+  font-size: 0.78rem;
+  line-height: 1.5;
+  color: var(--text-main);
+}
+.update-banner-body + .update-banner-body {
+  margin-top: 0.4rem;
+}
+
+/* Mirrors the rhythm of a release body in What's New, which renders the same
+   text from the same source (scripts/release-notes.mjs). */
+.update-notes {
+  margin: 0.9rem 0;
+}
+.update-notes .section-label {
+  margin-bottom: 0.4rem;
+}
+.update-notes .section-label:not(:first-child) {
+  margin-top: 0.9rem;
+}
+
+.update-progress {
+  margin: 0.8rem 0 0.35rem;
+}
+.update-progress-label {
+  font-size: 0.72rem;
+  color: var(--text-dim);
+}
+
+.update-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.9rem;
+}
+
+.update-error {
+  margin-top: 0.6rem;
+  font-size: 0.78rem;
+  color: #ff9aa5;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .menu-boot .menu-scrim,
   .menu-boot .menu-brand,
@@ -1384,8 +1540,12 @@ body[data-appmode='menu'][data-panel] .menu-inner {
   .menu-btn {
     transition-duration: 0.01ms;
   }
-  .menu-btn:hover:not(:disabled) {
+  .menu-btn:hover:not(:disabled),
+  .menu-update:hover:not(:disabled) {
     transform: none;
+  }
+  .progress-fill {
+    transition-duration: 0.01ms;
   }
   .release-caret {
     transition-duration: 0.01ms;

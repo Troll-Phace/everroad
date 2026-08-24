@@ -18,3 +18,7 @@ __pycache__/
 release/
 .cache/electron/
 .cache/electron-builder/
+
+# Generated per release by scripts/build-release-meta.mjs and uploaded as a
+# release asset; never committed.
+release-meta.json

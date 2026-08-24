@@ -12,6 +12,14 @@ import type { GameSettings, UIDeps } from '../types';
 import { isDesktop } from '../version/version';
 import { desktop } from '../version/desktop';
 import { createBuildBadge } from './buildBadge';
+import {
+  checkNow,
+  checksOnLaunch,
+  current as updateState,
+  setChecksOnLaunch,
+  updateOffered,
+  updatesSupported,
+} from './update';
 import { armConfirm } from './confirm';
 import { el } from './dom';
 import type { Effects } from './effects';
@@ -37,6 +45,9 @@ export function settingsPanel(
     title: 'Settings',
     key: 'Esc',
     render(content) {
+      /** Set by the Updates section below, when this build has one. */
+      let updateNote: (() => void) | null = null;
+
       // ---- audio ----------------------------------------------------------
       content.append(el('div', 'section-label', 'Audio'));
 
@@ -145,6 +156,60 @@ export function settingsPanel(
         }
       }
 
+      // ---- updates --------------------------------------------------------
+      // Desktop only. A browser tab cannot replace itself, and the web build's
+      // bridge is absent, so `updatesSupported()` is false and the whole
+      // section is simply not built.
+      if (updatesSupported()) {
+        content.append(el('div', 'panel-divider'));
+        content.append(el('div', 'section-label', 'Updates'));
+
+        const launchToggle = el('input');
+        launchToggle.type = 'checkbox';
+        launchToggle.className = 'toggle';
+        launchToggle.checked = checksOnLaunch();
+        launchToggle.addEventListener('change', () => setChecksOnLaunch(launchToggle.checked));
+        content.append(row('Check for updates on launch', launchToggle));
+        // Worth stating outright rather than leaving to be inferred: this is
+        // the only request the game makes of anything, and turning the toggle
+        // off means it is not made rather than made and ignored.
+        content.append(
+          el(
+            'div',
+            'settings-note',
+            'Everroad asks GitHub once per launch whether a newer release exists. ' +
+              'It is the only network request the game makes.',
+          ),
+        );
+
+        const checkBtn = el('button', 'btn btn-big', 'Check for updates');
+        const checkNote = el('div', 'settings-note', '');
+        checkBtn.addEventListener('click', () => checkNow());
+
+        /** One line describing wherever the updater currently is. */
+        function describe(): string {
+          const status = updateState();
+          if (status.phase === 'checking') return 'Checking…';
+          if (status.phase === 'error') return status.error ?? 'The last check failed.';
+          if (updateOffered(status)) return `v${status.version} is available — see the main menu.`;
+          if (status.checkedAt === null) return 'Not checked yet this session.';
+          return 'Everroad is up to date.';
+        }
+
+        checkNote.textContent = describe();
+        content.append(checkBtn, checkNote);
+
+        // Refreshed by the manager's own 250ms updater rather than by an
+        // `onUpdateStatus` subscription. The panel is torn down and rebuilt on
+        // every open and `PanelDef` has no teardown hook, so a subscription
+        // taken here would hold this card's closure — and every previous
+        // card's — for the life of the page.
+        updateNote = () => {
+          const line = describe();
+          if (checkNote.textContent !== line) checkNote.textContent = line;
+        };
+      }
+
       // ---- save -----------------------------------------------------------
       content.append(el('div', 'panel-divider'));
       content.append(el('div', 'section-label', 'Save'));
@@ -214,6 +279,10 @@ export function settingsPanel(
       // pasted into a bug report.
       content.append(el('div', 'panel-divider'));
       content.append(createBuildBadge('build-badge mono'));
+
+      // The only live line in an otherwise static panel. Returning null in the
+      // web build means the manager starts no interval at all.
+      return updateNote ?? undefined;
     },
   };
 }

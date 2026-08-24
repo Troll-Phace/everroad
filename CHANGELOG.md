@@ -15,6 +15,23 @@ the generated module.
 
 ## [Unreleased]
 
+### Added
+
+- **Everroad updates itself.** The desktop app checks for a newer release when
+  it starts, and tells you on the main menu when one is waiting. Open the notice
+  to read what changed and download it without leaving the game. On Windows and
+  on the Linux AppImage the update installs itself and Everroad restarts into
+  it; on macOS, the portable Windows build and the Fedora RPM it lands in your
+  Downloads folder for you to open, because those builds cannot replace
+  themselves.
+- **A warning before an update that could cost you your journey.** Everroad is
+  still finding its shape, and a release is occasionally allowed to change how
+  saves are stored. When one does, the update notice says so before you download
+  it, and tells you to copy your save code from Settings first.
+- **Updates in Settings.** A switch for the check on launch, a button to look
+  now, and a line saying where the last check got to. The check is the only
+  request Everroad makes of anything, and turning it off means it is not made.
+
 ## [0.1.17] - 2026-08-24
 
 ### Added

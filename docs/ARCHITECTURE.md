@@ -1409,6 +1409,7 @@ interface EverroadDesktop {
   readonly version: string;      // app.getVersion(), via additionalArguments
   readonly platform: string;     // process.platform
   quit(): void;                  // ipcRenderer.send('everroad:quit')
+  readonly updates?: EverroadUpdates;   // §16.8; absent in the web build
 }
 ```
 
@@ -1430,6 +1431,10 @@ subframe asking to quit the application is precisely the case to refuse.
 `src/version/desktop.ts` shape-checks the global rather than merely testing for
 its presence — `window.everroad` is a name anything could squat on, and a
 half-formed object should fail at the boundary rather than at a call site.
+`updates` is checked *separately*, by `desktopUpdates()`, and not folded into
+that predicate: a malformed updater object should cost the player the update
+affordance and nothing else, rather than also taking away Quit to Desktop, which
+has no relation to it.
 
 ### 16.5 The version module
 
@@ -1527,6 +1532,89 @@ code-signing certificate, so macOS Gatekeeper and Windows SmartScreen both warn
 on first launch. That is expected rather than a build fault, and
 docs/RELEASING.md documents exactly what a user sees on each OS and how to get
 past it.
+
+### 16.8 Automatic updates
+
+The desktop app checks for a newer release when it starts, tells the player on
+the main menu, and — where the artifact allows it — downloads and installs one
+in place. `electron/updater.cjs` is all of it.
+
+**The feed already existed.** Every release the workflow cuts publishes
+`latest.yml` / `latest-mac.yml` / `latest-linux.yml` next to the artifacts,
+because that is what `electron-builder --publish` does. That is precisely what
+`electron-updater` consumes, so the check needed no new publishing at all. One
+asset was added, for one reason, below.
+
+**Two deliveries.** "Install in place" is not available on every artifact this
+project ships, and a Download button that silently does nothing on three of five
+downloads would be worse than no button:
+
+```
+Windows NSIS      in-place   unsigned is fine; SmartScreen warns, as it does today
+Linux AppImage    in-place   electron-updater swaps the AppImage
+macOS             manual     Squirrel.Mac verifies the incoming bundle's signature
+                             against the running app's, and Everroad is unsigned
+                             (§16.7). Not a bug to fix; a certificate to buy.
+Windows portable  manual     target unsupported by electron-updater
+Linux rpm         manual     likewise
+```
+
+The mode is detected from `PORTABLE_EXECUTABLE_DIR` and `APPIMAGE`, which
+electron-builder's own launchers set, so it identifies the *artifact the user
+downloaded* rather than guessing from the platform. The manual path is not "go
+find it yourself": the same file the feed names is downloaded, its SHA-512
+checked against the feed's, written to Downloads and revealed in the file
+manager. Only the last click is the player's.
+
+**`release-meta.json`, and why a version number is not enough.** The one thing
+the feed cannot answer is the question worth asking before pressing Download:
+*will this still read my journey?* `SAVE_VERSION` is a compile-time constant
+baked into each bundle, so an old build cannot see the new one's value, and
+Everroad is pre-1.0 — a patch bump is explicitly allowed to move the save
+format. So each release publishes its own `SAVE_VERSION` as a small JSON asset
+(`scripts/build-release-meta.mjs`, uploaded by the `guard` job), the updater
+fetches it for the offered version, and the renderer compares it against its
+own. Higher means the warning banner. A release cut before this existed carries
+no such asset and reads as **unknown**, which the UI says out loud rather than
+flattening into "safe" — a warning that goes quiet when it does not know is a
+warning nobody can rely on.
+
+The warning's wording is exact about something easy to get wrong: an update does
+not wipe a save. The appId does not change, so the new build reads the same
+storage. The risk is narrower — a release that raises `SAVE_VERSION` may not be
+able to read the old shape, and once it autosaves, the old shape is gone.
+`loadGame`'s newer-save parking (§9) protects a *downgrade*; nothing protects the
+save an upgrade already overwrote. Hence the advice is to export, stated as the
+copy that actually survives.
+
+**Where the network is.** All of it is in the main process. The renderer's CSP
+still pins `connect-src 'self'` and gains no exception: the page asks the main
+process what it found and renders the answer. Every outbound byte in the
+application is in `updater.cjs`, and the check is renderer-*initiated* — the main
+process never reaches the network on its own, so the Settings toggle means no
+request is made rather than one made and discarded.
+
+**Five verbs, no arguments.** `check`, `download`, `install`, `reveal` and
+`openReleasePage` each act on state the main process derived from the feed
+itself. There is no URL, path or version for the renderer to supply, and
+therefore none for a compromised page to choose; the worst a subverted page can
+do is ask for an update that was already on offer. That is also why the release
+page — the app's one real outbound link — is opened by `updater.cjs` from a URL
+built out of its own constants, rather than by relaxing the `openExternal` ban in
+§16.2 to a host allowlist.
+
+**One packaging consequence.** `electron-updater` is real runtime code in the
+main process, so the blanket `!node_modules` exclusion in electron-builder.yml
+had to go and `dependencies` in package.json became load-bearing. `three` and
+`postprocessing` moved to `devDependencies` in the same change: Vite inlines both
+into `dist/` at build time, and leaving them listed as runtime dependencies would
+have shipped a second, unreferenced copy of Three.js inside every download.
+
+**Its limits, stated.** The check reads a public feed anonymously; a private
+repository would need a token the client cannot carry. macOS auto-install waits
+on an Apple Developer certificate and nothing else. And the end-to-end path can
+only be proven by two real releases — a local `npm run verify` proves the
+decision logic and the packaging, not the handoff.
 
 ---
 
