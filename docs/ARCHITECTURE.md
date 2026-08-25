@@ -157,7 +157,8 @@ src/
     materials.ts       Toon ramps, painterly materials, noise + RNG helpers
     roadPath.ts        Infinite procedural road curve
     chunks.ts          Chunk manager: road mesh, terrain ribbons, pooling
-    scenery.ts         Instanced trees/rocks/flowers/props per biome
+    scenery.ts         Merged-bake trees/rocks/flowers/props per biome
+    grass.ts           Instanced wind-animated ground cover, near band only
     biomes.ts          Biome visual definitions + blend sampling
     farLand.ts         Camera-anchored distant land past the ribbon's edge
     sky.ts             Gradient sky dome, sun disc, stars, aurora
@@ -480,8 +481,8 @@ for any new code:
 
 `CHUNK_LEN = 60` m, with `AHEAD = 22` chunks generated ahead of the car (~1.3
 km) and a tail behind it that depends on who is holding the camera:
-`PLAY_BEHIND = 3` while driving, `MENU_BEHIND = 10` in attract mode. So roughly
-25–28 chunks are alive in play and 32–35 under the menu. Each chunk owns a road
+`PLAY_BEHIND = 3` while driving, `MENU_BEHIND = 22` in attract mode. So roughly
+25–28 chunks are alive in play and 44–46 under the menu. Each chunk owns a road
 strip, a terrain ribbon, and one merged scenery mesh. Chunks are allocated on
 entry and disposed on exit — `update` builds any chunk in
 `[cur - behind, cur + AHEAD]` that is not in the map, then removes and
@@ -497,6 +498,82 @@ for whichever tail is current. `MENU_BEHIND` and `menuCamera`'s
 `MENU_SAFE_DISTANCE` are checked against each other in `menuCamera.test.ts`. There is no chunk pool;
 the geometry buffers are rebuilt per chunk. A perf regression here looks like a
 build spike at a chunk boundary, or geometries surviving the cull (see #5, #1).
+
+**How far back the menu tail has to reach** is worth stating carefully, because
+the obvious framing is wrong and was shipped wrong once. It is *not* a distance
+from the eye. `RoadPath` winds hard enough to double back on itself, so a cut
+600 m back along the arc is routinely only 250–350 m away in a straight line,
+and lengthening the tail can bring the cut *nearer* rather than further as the
+road loops around — measured across seven start positions, the nearest framed
+cut sat at 244–558 m for every tail from 6 to 27 chunks, with no trend. Sizing
+this against a euclidean distance looks reasonable and measures nothing.
+
+What hides the cut is the land in between. Sampling the live attract mode — the
+cut row raycast against the chunk meshes every frame, so a sample counts only
+when it is genuinely unoccluded rather than merely inside the frustum:
+
+| `MENU_BEHIND` | tail | frames | framed samples | **visible** | nearest visible |
+|---|---|---|---|---|---|
+| 3 (`PLAY_BEHIND`) | 180 m | 1530 | 423 | 24 | 193 m |
+| 10 (was) | 600 m | 1500 | 191 | **191** | 267 m |
+| 14 | 840 m | 1500 | 1833 | **824** | 348 m |
+| 16 | 960 m | 1500 | 10111 | 31 | 1029 m |
+| 18 | 1080 m | 831 | 5625 | 0 | — |
+| 22 (now) | 1320 m | 1009 | 429 | 0 | — |
+
+**Those rows are not equal weight and must not be read head to head.** Each is
+one live run of whatever length the session lasted, and how much of the cut gets
+framed swings by an order of magnitude with where on the road the car happens to
+be. The row that decides the constant rests on 429 framed samples; the `16` row
+rests on 10111 — 24× thinner evidence for the more important row. A zero on a
+thin row means "this run never walked a stretch that exposes the cut" at least as
+often as it means "closed". Only the shape survives that reading: exposure is
+total at the driving tail and at 600 m, and intermittent-to-absent past ~1 km.
+
+`menuCamera.test.ts` sweeps the same question offline, marching the sight line
+against the height field over three start positions and eight shots. It is a
+different and far looser instrument — it samples the height field rather than the
+drawn mesh, knows nothing of scenery or the far-land backdrop, and counts a march
+point that projects outside the ribbon as clear — so it is an **upper bound** on
+exposure rather than a second opinion on the numbers above:
+
+| `MENU_BEHIND` | tail | framed | seen | rate | nearest visible |
+|---|---|---|---|---|---|
+| 3 (`PLAY_BEHIND`) | 180 m | 41312 | 35959 | 8.7e-1 | 169 m |
+| 10 (was) | 600 m | 10458 | 9090 | 8.7e-1 | 460 m |
+| 14 | 840 m | 15961 | 5885 | 3.7e-1 | 705 m |
+| 16 | 960 m | 23430 | 4803 | 2.0e-1 | 737 m |
+| 18 | 1080 m | 32829 | 8565 | 2.6e-1 | 765 m |
+| 22 (now) | 1320 m | 51943 | 6378 | 1.2e-1 | 688 m |
+| 26 | 1560 m | 52709 | 0 | 0 | — |
+
+An earlier revision of this section printed rates of 1.9e-5 in that table. They
+came from a sweep whose visibility counter incremented only on a new
+record-minimum distance — so it counted record improvements, not unoccluded
+samples, and its rate was governed by its denominator. The figures above are the
+same sweep with the instrument fixed.
+
+The honest statement is narrower than "the cut closes past a kilometre". What the
+tail reliably buys is **distance**: the nearest exposed point of the cut goes
+169 → 460 → ~700 m over tails of 3, 10 and 14 chunks, and then stops. From 14 up
+the sweep cannot order the tails at all — 22 sits *nearer* than 14, 16 and 18,
+and the rate separates them no better. `menuCamera.test.ts` therefore asserts
+exactly that much and no more: a 650 m floor on the nearest exposed cut, with
+`PLAY_BEHIND` as a control that fails it at 169 m. **Do not tune either table
+down to a threshold.**
+
+22 rather than 14 is therefore a design argument, not a measurement. 1320 m is
+`AHEAD * CHUNK_LEN`, so the ribbon's rear cut ends exactly as far out as its
+forward cut: one number covers both ends of the world, met at both ends by the
+same haze and the same `FAR_LAND_HAZE_SCALE` backdrop — plus eight chunks of
+margin over the shortest tail the sweep cannot tell it from. Note what the haze
+does *not* do here. Whatever the sweep still reports exposed sits around 690 m,
+where the thinnest biome (`FOG_BASE_DENSITY` × `mist` 0.9) leaves 47% of the
+cut's contrast. Haze reaches 6.3% only at 1320 m — the distance the tail *ends*
+at, not a distance anything is seen at — so past ~800 m the occluding terrain is
+the mechanism, and haze is the backstop for the forward cut alone. The cost —
+twelve chunks over the previous menu tail, nineteen over the driving budget — is
+paid only while the menu is up.
 
 The road cross-section is a fixed column set (`ROAD_COLS`) running from dirt
 shoulder through asphalt to the cream center line, and the terrain ribbon spans
@@ -603,6 +680,28 @@ the effect is never built and a fan ordered after the disc erases it through
 the whole golden hour. That asymmetry between quality tiers is exactly the
 kind of bug a mid-quality playtest cannot see.
 
+It carries its own aerial perspective, and has to. The fan is a compressed
+stand-in — 4 km of geometry standing for tens of km of implied land — so its
+geometric radius is nowhere near the distance it depicts. Under the old fog that
+never showed, because everything past 400 m was saturated either way; at 0.0014
+it shows badly, because the ribbon's far edge 1320 m out is 96% hazed while the
+fan pixel directly above it is only 340 m away and 19% hazed. Left alone the
+backdrop stops being haze and becomes a vivid cone with a hard silhouette
+sitting on a pale strip of terrain — measured, and plainly visible on screen.
+`FAR_LAND_HAZE_SCALE = 4.5` fixes it by scaling the fan's **fog depth** in the
+vertex shader (a per-vertex `aHaze` attribute injected at `<fog_vertex>`), so it
+fogs on the distance it represents rather than the distance it occupies. The
+value is derived, not tuned: the nearest ring a horizon-grazing ray can meet is
+at radius 294.9 m, and `1320 / 294.9 = 4.477`. Rounding *up* matters, because
+the two directions are not symmetric — a backdrop hazier than the terrain in
+front of it is simply more recession, while one crisper than that terrain is the
+failure above. Scaling depth rather than baking a colour also keeps `mist`, the
+weather `fogMultiplier` and `nightness` working on the backdrop exactly as they
+work on the ribbon, and the density cancels out of `r * S >= AHEAD * CHUNK_LEN`,
+so the guarantee holds in every biome and weather rather than at one tuned
+density. Above about 5 there is nothing left to buy: 4.5 and 7 are
+indistinguishable on screen because the band is already saturated.
+
 Its elevation rises monotonically with radius, from 10° below the eye at
 120 m — well below ground level, so real terrain buries the inner rim wherever
 the ribbon still reaches that far; on the inside of the tightest bends the
@@ -698,7 +797,7 @@ Weather also multiplies earnings — aurora at ×1.50 is the largest situational
 modifier in the game, which is deliberate: the rarest, prettiest weather is also
 the most profitable, so noticing it is rewarded.
 
-### 5.7 Scenery (`scenery.ts`)
+### 5.7 Scenery (`scenery.ts`, `grass.ts`)
 
 Every scenery kind is a `Proto` — shared vertex/normal/color arrays built once.
 Chunks do not instance these: `ChunkManager.buildScenery` CPU-bakes every
@@ -725,11 +824,121 @@ kill the seam, while one kept deliberately vertical on a slope must bury its
 base deep enough that the downhill edge does not lift off. One number for both
 floats tree trunks or swallows grass.
 
+Props are not scattered independently. `buildScenery` emits them in seeded
+*runs*: a clump anchor draws a kind, a side and a lateral band, then one to
+eight members scatter within that kind's `CLUMP` reach of it. At the same count
+this reads several times denser than an even sprinkle, because the gaps between
+groves are what make the density legible as landscape rather than as texture.
+An anchor is inset along `s` by its own reach, so no run crosses a chunk seam
+and the obstacle keys stay owned by the chunk that made them. The near-road
+canopy clamp (`|lat| < 17` → scale ≤ 0.9) and near-miss registration are
+re-tested per member, not inherited from the anchor.
+
+The bake runs in two passes. Pass one places, drawing every random number and
+summing the proto vertex counts; pass two writes into `Float32Array`s sized
+from that total. Growing three `number[]`s by a hundred thousand `push`es was
+the bulk of the method's cost, and removing it is what paid for the density
+increase: per-chunk build time went *down* from 1.81 ms to 0.82 ms while the
+prop count went up ~1.85x.
+
+`flowers` and `sunflowerPatch` — the most-stamped protos in the world now —
+build their heads from `petalBlob` (an undivided icosahedron) with open-ended
+stems, roughly a quarter of the vertices of the `blob` used for tree canopies.
+At 9–24 cm across and never nearer than the shoulder, the subdivision was never
+resolved.
+
 Adding a scenery kind means: a new `SceneryKind` member, a `getProto` case, a
 weight in the relevant `BiomeVisual` entries, a `SLOPE_FOLLOW` lean value (the
 table is exhaustive over `SceneryKind`, so this one is a compile error rather
-than a silent default), and — if it should count for near-misses —
-registration as an `Obstacle` in `chunks.ts`.
+than a silent default), a `CLUMP` rule, and — if it should count for
+near-misses — registration as an `Obstacle` in `chunks.ts`.
+
+#### Dense ground cover (`grass.ts`)
+
+Grass is the one thing in the world that does **not** ride the merged bake, and
+the exception is worth stating precisely because it is easy to over-generalise.
+The merged bake wins when a chunk holds a few dozen props of a dozen *different*
+kinds: one mesh, one material, one draw call, and the per-vertex CPU transform
+is paid over a few tens of thousands of vertices. Grass is the opposite shape —
+thousands of copies of a *single* proto in one chunk — which is exactly what
+`InstancedMesh` is for. Baking 2400 clusters through the merged path would cost
+a CPU transform of ~72k vertices per chunk; instancing costs one matrix each
+and still draws in one call. So the rule stands as it was: **one draw call per
+chunk**, and the mechanism differs only where the kind count collapses to one.
+
+Five things constrain the field:
+
+- **A near band, not the `AHEAD` window.** Grass is invisible past ~150 m, so
+  it is built only for `GRASS_BEHIND = 1` chunk behind the car and the tier's
+  `ahead` (2–3) in front — four to five live meshes against the manager's 26
+  chunks. Meshes are added and dropped as the car advances, so the steady-state
+  cost is **one chunk built per chunk boundary**, never a window rebuild. A
+  build spike at a boundary is the regression to watch (§5.3, §14).
+- **Placement is on the drawn surface by construction.** Rather than scatter in
+  `(s, lat)` and sample the surface back — `groundProp`'s route, at three
+  `RoadPath.pose` lookups a prop — clusters are scattered *inside the terrain
+  mesh's own cells*: pick a row, pick a column band, pick barycentric `(u, v)`,
+  and interpolate the four corners on the same `a,b,c / b,d,c` diagonal the
+  index buffer draws. The result lies on the rendered triangle exactly, with no
+  per-cluster path sampling at all. Both this and `buildTerrain` read their
+  corners from one exported `terrainRow`, so the two cannot drift; grounding to
+  `terrainHeight` instead is the "floating trees" bug (§5.3).
+- **Lateral bias toward the road.** `lateralDensity` is `1 / (1 + (lat/12)²)`,
+  zeroed inside `GRASS_MIN_LAT = 5.9` m and past `GRASS_MAX_LAT = 75` m, and
+  `GRASS_BANDS` integrates it across each `TER_COLS` pair into a cumulative
+  distribution. The shoulder therefore carries ~19x the per-m² density of the
+  far field. Uniform scatter over the ribbon would spend almost every blade on
+  ground the chase camera never frames.
+- **Floating-origin safety comes from the parent.** Each mesh hangs on its
+  chunk's existing `THREE.Group`, so `ChunkManager`'s rebase, cull and
+  `dispose()` lifecycle cover it for free. Nothing caches a world position, and
+  the wind's spatial phase is keyed off `(s, lat)` rather than world XZ, so a
+  rebase cannot shift the gust pattern (§5.2).
+- **No shadow casting.** Thousands of instanced casters do not fit the shadow
+  budget; `castShadow` is always false. `receiveShadow` is on at medium and
+  high — without it, grass standing in a tree's shadow glows against the
+  shadowed terrain underneath — and off at low.
+
+Wind lives in the vertex shader; a CPU per-instance update at this count is not
+affordable. A `MeshToonMaterial` is extended through `onBeforeCompile`, keeping
+the toon ramp and the fog chunks (grass must sit inside the haze band like
+everything else). Displacement is `bend × power × (0.55 + 0.45·sway + gust)`,
+where `bend` is a per-vertex mask of blade-local height so the root stays
+planted and the tip travels, `sway` is a slow sine offset per instance by
+`swayPhase(s, lat)` so a field never pulses in lockstep, and `gust` is a faster
+sine whose phase is advanced by `ripplePhase(s, lat)` — a projection of path
+position onto the gust axis — so gusts read as travelling across the field.
+The instance matrix carries a random yaw, so the world wind vector is projected
+onto the instance's own axes before it displaces anything, and the inverse
+scale cancels the scale the matrix re-applies. A bending blade also shortens,
+or the tips stretch as they lean. `uTime` wraps at `GRASS_TIME_WRAP`, a period
+over which both sine rates complete a whole number of cycles, which keeps the
+float32 uniform precise across a session measured in days without a visible
+jump. Strength comes from `windStrength(rainIntensity, leafIntensity)` fed from
+`Weather.intensity` — calm in `clear`, roughly 3.5x that in rain.
+
+Colour follows the biome through `blendColor` over `ground`/`groundAlt`,
+sampled at both ends of the chunk and lerped per cluster, so the field is
+continuous across a seam and does not pop at a biome crossfade (§5.4).
+Per-instance variation rides `InstancedMesh.setColorAt`, and the blade's own
+vertical gradient rides the proto's vertex colours; three.js multiplies both.
+
+Blade quads are emitted with **both windings** against a `FrontSide` material
+rather than using `DoubleSide`: three flips the normal on a back face, which
+would leave half of every blade unlit, and the up-biased normal is what makes
+grass shade like the ground it stands on. The cost is index-buffer size, not
+vertex or fragment work, since one of the two is always culled.
+
+`GRASS_TIERS` is the quality ladder. `low` is not merely thinner: it drops a
+blade and a height segment from the proto, compiles the gust term out of the
+shader, loses the shadow-map fetch, and carries one chunk fewer — genuinely
+cheaper, the way §5.8 requires of `low`. Quality changes route through
+`GrassField.setQuality` from the same `UIActions.setQuality` path
+`PostFX.setQuality` takes; the field bumps a revision, `ChunkManager` records it
+per chunk in the typed `Chunk.grassRev` as it builds that chunk's grass, and any
+chunk holding an older one is rebuilt. That comparison runs per band chunk per
+frame, so it is kept off `userData` deliberately: an untyped stamp that stopped
+matching would rebuild the whole band every frame with nothing to catch it.
 
 ### 5.8 Materials and post-processing (`materials.ts`, `postfx.ts`)
 
@@ -738,6 +947,48 @@ registration as an `Obstacle` in `chunks.ts`.
 world. The painterly look is the sum of: 3-step toon shading, saturated pastel
 palettes, per-instance vertex-color jitter, `FogExp2` tinted from the biome
 blend, the gradient sky, and the effect stack.
+
+#### Fog and aerial perspective
+
+`scene.fog` is a single `FogExp2` driven from `main.ts` every frame. Density is
+`FOG_BASE_DENSITY * mist * (1 + nightness * 0.25)`, where `mist` is the biome's
+own multiplier put through `Weather.fogMultiplier`. `FogExp2` extinguishes
+contrast as `exp(-(d * density)^2)`, so the base density is really a statement
+about how far the world keeps its colour:
+
+| distance | 0.0038 (was) | **0.0014 (now)** |
+|---|---|---|
+| 200 m | 44% | **7.5%** |
+| 300 m | 73% | **16.2%** |
+| 400 m | 90% | **26.9%** |
+| 500 m | 97% | **38.7%** |
+| 600 m | 99.4% | **50.6%** |
+| 800 m | 100% | **71.5%** |
+| 1000 m | 100% | **85.9%** |
+| 1320 m | 100% | **96.7%** |
+
+The old column is the "distant terrain goes white in clear weather" report: past
+roughly 400 m every frame was one flat tone, worst in Emberwood where a bright
+band sat against saturated orange canopies. The floor under the new value is the
+ribbon, not taste — it ends at `AHEAD * CHUNK_LEN` = 1320 m, and the haze is
+what hides that cut, so a thinner fog forces `AHEAD` up and costs build time and
+memory (§14).
+
+Colour is the other half, and it was the larger half of the *white*. The fog was
+the sky's horizon colour lerped **0.42** toward the biome `fogTint`; against an
+already pale daytime horizon that landed on a milky non-colour belonging to
+neither the sky nor the land. It is now built as aerial perspective: start from
+`sky.horizonColor`, take only `FOG_BIOME_TINT` (0.16) of the biome tint so the
+tint is an identity rather than the whole answer, pull `FOG_AERIAL_MIX` toward
+`AERIAL_HAZE` (a desaturated sky blue — scattered light is the same blue the sky
+is), and finally darken by `FOG_SHADE`. That last step is what keeps the far
+ridge legible: distant land reads as land because it sits a little deeper in
+value than the air above it, and a fog colour identical to the horizon dissolves
+the silhouette into the sky. The aerial mix backs off through golden hour, where
+the scattered light genuinely is warm, and to zero at night.
+
+The backdrop has to be told about all this separately — see
+`FAR_LAND_HAZE_SCALE` in §5.3, and the module comment in `world/farLand.ts`.
 
 `PostFX` composes god rays (pmndrs `GodRaysEffect` on the sun disc), bloom,
 vignette, and SMAA. The quality setting (`low | medium | high`) scales this
@@ -1353,9 +1604,11 @@ them live.
 | Frame rate | 60 fps at `quality: high` on a 2020-class integrated GPU | The whole design assumes a steady frame; a dip is a bug, not a setting |
 | Frame budget | ~16.6 ms, with the effect stack inside it | God rays plus bloom are the largest single cost |
 | Per-frame allocation | Zero steady-state | Scratch vectors and colors are hoisted; pooling and instancing everywhere |
-| Live chunks | 25–28 driving, 32–35 in menu | `AHEAD = 22`, `PLAY_BEHIND = 3`, `MENU_BEHIND = 10`, `CHUNK_LEN = 60` |
+| Live chunks | 25–28 driving, 44–46 in menu | `AHEAD = 22`, `PLAY_BEHIND = 3`, `MENU_BEHIND = 22`, `CHUNK_LEN = 60`. The menu tail is sized by what occludes the rear cut, not by a fog distance — §5.3 |
 | Live coin instances | ≤ 160 | `COIN_CAP` |
-| Draw calls | Instanced per scenery kind per chunk, not per object | A per-object draw call in `scenery.ts` is a regression |
+| Draw calls | One per chunk for merged scenery, one more for its grass | A per-object draw call in `scenery.ts` is a regression. Measured 98 -> 102 for the whole scene when the grass band is added |
+| Per-chunk build | ~2 ms at `quality: high` | 1.81 ms before the density overhaul; 0.82 ms for the merged bake alone after it, 1.97 ms with `high` grass. One chunk is built per chunk boundary, never a window |
+| Grass band | 4-5 live `InstancedMesh`es, 1800-12000 clusters | `GRASS_TIERS` x `GRASS_BEHIND`. Never the `AHEAD` window |
 | Cold start to playable | Under ~3 s on a warm cache | Nothing is fetched; the loading screen covers scene construction |
 | Bundle | Well under the 1500 kB Vite warning ceiling | Three.js dominates; a new dependency needs a reason |
 | Handcrafted models | ≤ 120 kB of decoded geometry across all of them | Enforced by `npm run models`; a scenery proto should sit near its procedural counterpart's triangle count, not the ceiling |
@@ -1414,8 +1667,20 @@ them live.
 |----------|-------|------|
 | `BASE_COINS_PER_MILE` | 60 | `game/economy/economy.ts` |
 | `BIOME_LEN` / `BLEND_LEN` | 2700 m / 520 m | `world/biomes.ts` |
-| `CHUNK_LEN` / `AHEAD` / `PLAY_BEHIND` / `MENU_BEHIND` | 60 m / 22 / 3 / 10 | `world/chunks.ts` |
+| `CHUNK_LEN` / `AHEAD` / `PLAY_BEHIND` / `MENU_BEHIND` | 60 m / 22 / 3 / 22 | `world/chunks.ts` |
+| `GRASS_BEHIND` | 1 chunk | `world/chunks.ts` |
+| `GRASS_TIERS` clusters/chunk | 450 / 1200 / 2400 (low / medium / high) | `world/grass.ts` |
+| `GRASS_TIERS` blades x segments | 3x1 / 4x1 / 5x2 | `world/grass.ts` |
+| `GRASS_TIERS` chunks ahead | 2 / 3 / 3 | `world/grass.ts` |
+| `GRASS_MIN_LAT` / `GRASS_MAX_LAT` | 5.9 m / 75 m | `world/grass.ts` |
+| `GRASS_SWAY_RATE` / `GRASS_RIPPLE_RATE` | 0.9 / 2.7 rad/s | `world/grass.ts` |
+| `GRASS_TIME_WRAP` | 2pi*1000 s (~1.7 h) | `world/grass.ts` |
+| Scenery `density` per chunk | 68-94 by biome | `world/biomes.ts` |
 | `DS` / `ROAD_HALF_WIDTH` / `LANE_OFFSET` | 2 m / 4.6 m / 2.1 m | `world/roadPath.ts` |
+| `FOG_BASE_DENSITY` | 0.0014 | `main.ts` |
+| `FOG_BIOME_TINT` / `FOG_AERIAL_MIX` / `FOG_SHADE` | 0.16 / 0.40 / 0.10 | `main.ts` |
+| `FOG_FULL` / `RAIN_HAZE` | 4.4 / 0.9 | `world/weather.ts` |
+| `FAR_LAND_HAZE_SCALE` / `FAR_LAND_HAZE_RAMP_T` | 4.5 / 0.25 | `world/farLand.ts` |
 | `CYCLE_SEC` | 545 s | `engine/daynight.ts` |
 | `HOLD_TIMEOUT` | 4 s | `engine/input.ts` |
 | `MAX_LATERAL` | 6.6 m | `world/vehicle.ts` |

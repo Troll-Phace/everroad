@@ -131,6 +131,18 @@ function blob(r: number): THREE.BufferGeometry {
   return new THREE.IcosahedronGeometry(r, 1);
 }
 
+/**
+ * A blob for something small enough that the subdivision is never resolved —
+ * flower and sunflower heads, which are 9-24 cm across and are never nearer
+ * than the shoulder. At `density`'s current numbers these are the most-stamped
+ * parts in the world, so the 4x vertex saving over `blob` is the difference
+ * between a field of flowers and a field of flowers the chunk bake can afford
+ * (docs/ARCHITECTURE.md §5.7).
+ */
+function petalBlob(r: number): THREE.BufferGeometry {
+  return new THREE.IcosahedronGeometry(r, 0);
+}
+
 const protoCache = new Map<SceneryKind, Proto>();
 
 export function getProto(kind: SceneryKind): Proto {
@@ -333,12 +345,13 @@ export function buildProceduralProto(kind: SceneryKind): Proto {
         const z = (r() - 0.5) * 1.6;
         const h = 0.5 + r() * 0.35;
         parts.push({
-          geo: new THREE.CylinderGeometry(0.03, 0.04, h, 4),
+          // Open-ended: both caps sit inside the ground or under the head.
+          geo: new THREE.CylinderGeometry(0.03, 0.04, h, 4, 1, true),
           matrix: mat(x, h / 2, z),
           bakedColor: '#5da84e',
         });
         parts.push({
-          geo: blob(0.16),
+          geo: petalBlob(0.16),
           matrix: mat(x, h + 0.08, z),
           instanceTint: true,
           shadeFn: () => 1.1,
@@ -434,17 +447,17 @@ export function buildProceduralProto(kind: SceneryKind): Proto {
         const z = (r() - 0.5) * 2.6;
         const h = 1.1 + r() * 0.5;
         parts.push({
-          geo: new THREE.CylinderGeometry(0.04, 0.05, h, 4),
+          geo: new THREE.CylinderGeometry(0.04, 0.05, h, 4, 1, true),
           matrix: mat(x, h / 2, z),
           bakedColor: '#4e9440',
         });
         parts.push({
-          geo: blob(0.24),
+          geo: petalBlob(0.24),
           matrix: mat(x, h + 0.1, z, 1, 0.6, 1),
           instanceTint: true,
           shadeFn: () => 1.15,
         });
-        parts.push({ geo: blob(0.09), matrix: mat(x, h + 0.16, z), bakedColor: '#7a4a26' });
+        parts.push({ geo: petalBlob(0.09), matrix: mat(x, h + 0.16, z), bakedColor: '#7a4a26' });
       }
       return buildProto(parts, 1.7, 1.7, 53);
     }

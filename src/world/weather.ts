@@ -9,6 +9,19 @@ import { BIOMES } from './biomes';
 
 const FADE_SEC = 8;
 
+/**
+ * Extra fog-density multiples at full `fog` weather, on top of the biome's own
+ * `mist`. See `fogMultiplier` for what the number buys.
+ */
+export const FOG_FULL = 4.4;
+
+/**
+ * Extra fog-density multiples at full `rain`. Rain is not a fog bank, but a
+ * downpour that leaves the far field as crisp as a clear noon reads as
+ * particles pasted over the weather rather than weather.
+ */
+export const RAIN_HAZE = 0.9;
+
 const LEAF_COLORS: Partial<Record<BiomeId, string[]>> = {
   autumn: ['#e8542f', '#f07f36', '#f2a53a', '#d43b28'],
   cherry: ['#f7bcd2', '#ffd2e4', '#f2a0c0'],
@@ -90,9 +103,19 @@ export class Weather {
     return v;
   }
 
-  /** Multiplier applied to base fog density. */
+  /**
+   * Multiplier applied to `FOG_BASE_DENSITY` (main.ts).
+   *
+   * These coefficients are a visibility, not a taste: `FogExp2` saturates at
+   * `exp(-(d * density)^2)`, so the product with the base density is what says
+   * how far a fog bank lets the player see. `FOG_FULL` puts clear-weather
+   * meadow at ~150 m of visibility and Mistpine at ~90 m — a bank you drive
+   * into rather than a hazy afternoon. It was 2.6 against a base of 0.0038,
+   * which was ~60 m and closed the world down to the bonnet; carrying 2.6 onto
+   * the thinner base instead left "fog" reading as a clear day.
+   */
   fogMultiplier(biomeMist: number): number {
-    return biomeMist * (1 + this.intensity('fog') * 2.6 + this.intensity('rain') * 0.5);
+    return biomeMist * (1 + this.intensity('fog') * FOG_FULL + this.intensity('rain') * RAIN_HAZE);
   }
 
   get auroraStrength(): number {

@@ -15,6 +15,32 @@ the generated module.
 
 ## [Unreleased]
 
+### Added
+
+- **The countryside grew a floor.** The verges either side of the road used to
+  be a flat sheet of green; they are now thick with grass — thousands of tufts
+  a stretch, dense at the shoulder and thinning out into the fields — and it
+  moves. Slow sways with gusts travelling across the field on top of them, calm
+  on a clear day and thrashing in the rain. It follows whichever biome you are
+  in, so the meadow's grass and the marsh's grass are not the same green. Turn
+  the graphics quality down if your machine would rather have the frames.
+
+### Changed
+
+- **You can see where you are going.** Distant country used to disappear into a
+  flat white haze a couple of hundred metres out — worst in Emberwood, where a
+  milky band sat right across those orange canopies. The air has been thinned
+  out and given its colour back: fields, hedgerows and treelines now keep their
+  own colour most of a kilometre down the road, and what finally takes them is a
+  soft blue distance with ridges standing in it, the way real far-off land goes.
+  Sunsets keep their warmth in the haze instead of being bleached out of it.
+  Mistpine and Dawnmarsh are still the hazy ones, and a fog bank still closes the
+  world down to the next bend.
+
+- **Fuller countryside.** Trees now grow in groves and clearings instead of
+  standing about one at a time, flowers gather in drifts and carry much further
+  out into the fields, and there are a lot more of both.
+
 ### Fixed
 
 - **The world no longer runs out behind you on the title screen.** The menu's

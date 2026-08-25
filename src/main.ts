@@ -16,6 +16,7 @@ import { Input } from './engine/input';
 import { DayNight } from './engine/daynight';
 import { RoadPath } from './world/roadPath';
 import { CHUNK_LEN, ChunkManager, MENU_BEHIND, PLAY_BEHIND } from './world/chunks';
+import { GrassField, windStrength } from './world/grass';
 import { Sky } from './world/sky';
 import { FarLand } from './world/farLand';
 import { START_S, Vehicle } from './world/vehicle';
@@ -122,8 +123,68 @@ renderer.shadowMap.enabled = true;
 // changes the console, not a pixel. src/tools/modelViewer.ts mirrors this.
 renderer.shadowMap.type = THREE.PCFShadowMap;
 
+/**
+ * Base `FogExp2` density in clear weather at `mist: 1.0`, before the biome and
+ * weather multipliers below.
+ *
+ * `FogExp2` extinguishes contrast as `exp(-(d * density)^2)`, so this number is
+ * really a choice of how far the world keeps its colour. At the 0.0038 this
+ * shipped with, 400 m was 90% hazed and 500 m 97%: past a couple of hundred
+ * metres the whole frame was one flat tone, which is the "distant terrain goes
+ * white" report. At 0.0014 the same land is 27% hazed at 400 m and 51% at
+ * 600 m, and does not saturate until roughly a kilometre out.
+ *
+ * The ceiling is the terrain ribbon, not taste. It ends at `AHEAD * CHUNK_LEN`
+ * = 1320 m, and the haze is what hides that cut: at 0.0014 the last row keeps
+ * 3.6% of its contrast (6.3% at the thinnest biome), which `world/farLand.ts`
+ * meets from behind at the same value. Thinner than this and `AHEAD` has to
+ * rise to match, which is chunk build time and memory (§14).
+ */
+const FOG_BASE_DENSITY = 0.0014;
+
+/**
+ * The daylight haze colour distant land trends to.
+ *
+ * A desaturated sky blue, deliberately not white. Aerial perspective is light
+ * scattered *into* the sight line by air, which is the same blue the sky is;
+ * the milky look came from mixing a pale biome tint into an already pale
+ * daytime horizon and landing on nothing in particular.
+ */
+const AERIAL_HAZE = new THREE.Color('#7b9cc0');
+
+/**
+ * Biome `fogTint`'s share of the fog colour.
+ *
+ * Was 0.42, which made the tint most of the answer and the horizon a pale
+ * wash of it. At 0.16 the tint is what it says it is in `biomes.ts` — a subtle
+ * identity, Emberwood's haze warmer than Mistpine's — while the sky and the
+ * aerial blue decide the actual colour.
+ */
+const FOG_BIOME_TINT = 0.16;
+
+/**
+ * How far the daylight fog is pulled from the sky's horizon colour toward
+ * `AERIAL_HAZE`. Backed off through golden hour, where the scattered light
+ * genuinely is warm and a blue haze would grey out the sunset, and to zero at
+ * night, where the horizon is already dark and cool.
+ */
+const FOG_AERIAL_MIX = 0.4;
+
+/**
+ * How much darker than the sky the haze sits.
+ *
+ * Without it the far band matches the horizon exactly and the ridge dissolves
+ * — which is precisely the lid `world/farLand.ts` exists to avoid. Distant
+ * land reads as land because it is a little deeper in value than the air above
+ * it; a tenth is enough to separate the silhouette without turning it into a
+ * bruise.
+ */
+const FOG_SHADE = 0.1;
+
 const scene = new THREE.Scene();
-scene.fog = new THREE.FogExp2('#d2ecd2', 0.0045);
+// Replaced on the first rendered frame by the loop below; this is only what
+// the scene holds while it is being built.
+scene.fog = new THREE.FogExp2('#b6cbdd', FOG_BASE_DENSITY);
 
 const hemi = new THREE.HemisphereLight('#bfe3ff', '#7ec850', 0.75);
 scene.add(hemi);
@@ -139,7 +200,11 @@ const sun = sunShadow.light;
 const input = new Input();
 const daynight = new DayNight(runtime.timeOfDay);
 const path = new RoadPath(20260824);
-const chunks = new ChunkManager(path, scene);
+// Dense instanced ground cover. Built for a near band of chunks only and
+// hung on their groups, so it rides the floating-origin rebase and the chunk
+// cull for free (docs/ARCHITECTURE.md §5.7).
+const grass = new GrassField(state.settings.quality);
+const chunks = new ChunkManager(path, scene, grass);
 const sky = new Sky(scene);
 // Distant land past the terrain ribbon's lateral edge (docs/ARCHITECTURE.md §5.3).
 const farLand = new FarLand(scene);
@@ -210,6 +275,7 @@ function replaceState(next: GameState): void {
   // Imported/reset settings must reach the systems that otherwise only read
   // them at boot or through their own UI actions.
   postfx.setQuality(state.settings.quality);
+  grass.setQuality(state.settings.quality);
   audio.setEnabled(state.settings.audioEnabled);
 }
 
@@ -281,6 +347,9 @@ const actions: UIActions = {
   setQuality(q) {
     state.settings.quality = q;
     postfx.setQuality(q);
+    // Same path PostFX takes: the field re-shapes its proto and shader, and
+    // ChunkManager rebuilds the near band on the next update().
+    grass.setQuality(q);
   },
   getCarSpeed: () => economy.getCarSpeed(state),
   hasSave: () => save.hasSave(),
@@ -696,6 +765,9 @@ function frame(now: number): void {
     now / 1000,
   );
   if (weather.current !== runtime.weatherId) runtime.weatherId = weather.current;
+  // Wind: calm in clear weather, gusty in rain, with a lift while leaves are
+  // drifting. One uniform tick for every grass chunk in the band.
+  grass.tick(dt, windStrength(weather.intensity('rain'), weather.intensity('leaves')));
 
   // ---- economy tick + achievements ----
   // Both are skipped wholesale in the menu: applyTick is the only writer of
@@ -733,15 +805,20 @@ function frame(now: number): void {
   farLand.update(camPos, vehicle.s);
   postfx.setGolden(snap.golden, snap.elevation > -0.05);
 
-  // Fog: horizon color blended with biome fog tint; density from mist/weather.
+  // Fog: aerial perspective off the sky's own horizon, carrying a little of
+  // the biome's tint; density from mist/weather.
   blendColor(vehicle.s, (b) => b.fogTint, fogTint);
-  fogColor.copy(sky.horizonColor).lerp(fogTint, 0.42 * (1 - snap.nightness * 0.6));
+  fogColor
+    .copy(sky.horizonColor)
+    .lerp(fogTint, FOG_BIOME_TINT * (1 - snap.nightness * 0.6))
+    .lerp(AERIAL_HAZE, FOG_AERIAL_MIX * (1 - snap.golden * 0.5) * (1 - snap.nightness))
+    .multiplyScalar(1 - FOG_SHADE * (1 - snap.nightness * 0.5));
   const fog = scene.fog as THREE.FogExp2;
   fog.color.copy(fogColor);
   // blendNumber uses the same road-position weights as every other biome
   // field — the dominant-id flip at blend 0.5 must not pop the density.
   const mist = weather.fogMultiplier(blendNumber(vehicle.s, (b) => b.mist));
-  fog.density = 0.0038 * mist * (1 + snap.nightness * 0.25);
+  fog.density = FOG_BASE_DENSITY * mist * (1 + snap.nightness * 0.25);
 
   // Lights follow the sun. The shadow rig re-derives its placement from the
   // car's post-rebase position every frame, so it never caches world coords.
@@ -827,6 +904,8 @@ if (import.meta.env.DEV) {
     daynight,
     weather,
     chunks,
+    grass,
+    renderer,
     pickups,
     scene,
     path,

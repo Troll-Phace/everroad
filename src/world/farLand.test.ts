@@ -7,14 +7,19 @@ import {
   FAR_LAND_OUTER_RADIUS,
   FAR_LAND_RIDGE_ANGLE_DEG,
   FAR_LAND_RIDGE_NOISE_DEG,
+  FAR_LAND_HAZE_RAMP_T,
+  FAR_LAND_HAZE_SCALE,
   FAR_LAND_RINGS,
   FAR_LAND_SEGMENTS,
   buildFarLandGeometry,
   farLandAngle,
+  farLandBaseAngle,
+  farLandHazeDepth,
+  farLandHazeScale,
   farLandHeight,
   farLandRadius,
 } from './farLand';
-import { CHUNK_LEN, PLAY_BEHIND, TER_COLS } from './chunks';
+import { AHEAD, CHUNK_LEN, PLAY_BEHIND, TER_COLS } from './chunks';
 import { BIOMES, BIOME_LEN, BLEND_LEN, biomeAt, blendColor, createBiomeSample } from './biomes';
 
 const AZIMUTHS = 720;
@@ -124,6 +129,129 @@ describe('far land profile', () => {
         );
       }
     }
+  });
+});
+
+/**
+ * Fog transmittance at `d` metres for a given `FogExp2` density — the fraction
+ * of a surface's own contrast that survives the haze. three computes the fog
+ * factor as `1 - exp(-(density * depth)^2)`, so this is its complement.
+ */
+function transmittance(d: number, density: number): number {
+  return Math.exp(-Math.pow(d * density, 2));
+}
+
+describe('far land aerial perspective', () => {
+  /** The base density in main.ts, times the thinnest `mist` any biome asks. */
+  const THINNEST = 0.0014 * 0.9;
+
+  it('leaves the buried rim fogging on its own true distance', () => {
+    // The rim sits a few tens of metres from the eye. Where the ribbon narrows
+    // on the inside of a tight bend and it shows through, a rim already carrying
+    // kilometres of haze would be a saturated smudge against near ground.
+    expect(farLandHazeScale(0)).toBeCloseTo(1, 12);
+    expect(farLandHazeDepth(0)).toBeCloseTo(FAR_LAND_INNER_RADIUS, 9);
+  });
+
+  it('reaches full scale by the first ring a horizon-grazing ray can meet', () => {
+    expect(farLandHazeScale(FAR_LAND_HAZE_RAMP_T)).toBeCloseTo(FAR_LAND_HAZE_SCALE, 9);
+    expect(farLandHazeScale(1)).toBeCloseTo(FAR_LAND_HAZE_SCALE, 9);
+  });
+
+  it('rises monotonically, so no ring is clearer than one nearer the eye', () => {
+    // A dip would put a crisp ring beyond a hazy one and read as a hole in the
+    // backdrop. Both the scale and the depth it produces have to be monotone —
+    // the radius is already exponential, so only the scale can break it.
+    let prevScale = -Infinity;
+    let prevDepth = -Infinity;
+    for (let i = 0; i <= 1000; i++) {
+      const t = i / 1000;
+      const scale = farLandHazeScale(t);
+      const depth = farLandHazeDepth(t);
+      expect(scale).toBeGreaterThanOrEqual(prevScale);
+      expect(depth).toBeGreaterThan(prevDepth);
+      prevScale = scale;
+      prevDepth = depth;
+    }
+  });
+
+  it('never fogs the fan as though it were nearer than it is', () => {
+    // Scaling below 1 would make the backdrop crisper than its own geometry,
+    // which is the one direction that cannot be justified as perspective.
+    for (let i = 0; i <= 200; i++) {
+      const t = i / 200;
+      expect(farLandHazeScale(t)).toBeGreaterThanOrEqual(1);
+      expect(farLandHazeDepth(t)).toBeGreaterThanOrEqual(farLandRadius(t) - 1e-9);
+    }
+  });
+
+  it('is never crisper than the ribbon\u2019s far cut anywhere along the join', () => {
+    // The join: a sight line grazing the horizon from a camera ~5 m over the
+    // road leaves the ribbon at `AHEAD * CHUNK_LEN` and meets the fan somewhere
+    // in [-1.1, +0.7] degrees of elevation, the spread being road elevation
+    // over 1320 m tilting it. The fan may imply *more* distance than the cut —
+    // that is just more recession — but never less, or a vivid backdrop sits on
+    // a pale strip of terrain. Asserted on depth rather than on a fog factor
+    // because the density cancels: this then holds in every biome, hour and
+    // weather rather than at one tuned value.
+    const cut = AHEAD * CHUNK_LEN;
+    for (let deg = -1.1; deg <= 0.7001; deg += 0.05) {
+      let t = 1;
+      for (let i = 0; i <= 4000; i++) {
+        const u = i / 4000;
+        if ((farLandBaseAngle(u) * 180) / Math.PI >= deg) {
+          t = u;
+          break;
+        }
+      }
+      expect(farLandHazeDepth(t)).toBeGreaterThanOrEqual(cut);
+    }
+  });
+
+  it('does not over-haze the join to buy that margin', () => {
+    // The far end of the join band pays for covering the near end. Keeping it
+    // inside 1.5x the cut is what stops "never crisper" being satisfied by
+    // simply saturating the entire backdrop, which would flatten the ridge back
+    // into the lid this module exists to avoid.
+    let t = 1;
+    for (let i = 0; i <= 4000; i++) {
+      const u = i / 4000;
+      if ((farLandBaseAngle(u) * 180) / Math.PI >= 0.7) {
+        t = u;
+        break;
+      }
+    }
+    expect(farLandHazeDepth(t)).toBeLessThan(1.5 * AHEAD * CHUNK_LEN);
+  });
+
+  it('finishes its ramp before the first ring the join can reach', () => {
+    // `FAR_LAND_HAZE_SCALE` is derived at full scale, so a ramp still climbing
+    // at the lowest join ring (t = 0.2564) would leave the guarantee above
+    // resting on a value the fan never actually reaches there.
+    expect(FAR_LAND_HAZE_RAMP_T).toBeLessThan(0.2564);
+    expect(farLandHazeScale(0.2564)).toBeCloseTo(FAR_LAND_HAZE_SCALE, 9);
+  });
+
+  it('is saturated by the ridge, so the silhouette is haze and not a hillside', () => {
+    // The ridge is the backdrop's top edge. If its own colour still showed
+    // there it would read as a solid green cone rather than distant air.
+    expect(transmittance(farLandHazeDepth(1), THINNEST)).toBeLessThan(1e-6);
+  });
+
+  it('carries the scale into the geometry, one value per ring', () => {
+    const geo = buildFarLandGeometry();
+    const haze = geo.getAttribute('aHaze');
+    expect(haze.count).toBe(FAR_LAND_RINGS * FAR_LAND_SEGMENTS);
+    expect(haze.itemSize).toBe(1);
+    for (let i = 0; i < FAR_LAND_RINGS; i++) {
+      const expected = farLandHazeScale(i / (FAR_LAND_RINGS - 1));
+      for (let j = 0; j < FAR_LAND_SEGMENTS; j++) {
+        // Constant around the azimuth: haze is a function of distance only, and
+        // a per-azimuth wobble would read as blotches on the horizon.
+        expect(haze.getX(i * FAR_LAND_SEGMENTS + j)).toBeCloseTo(expected, 6);
+      }
+    }
+    geo.dispose();
   });
 });
 
