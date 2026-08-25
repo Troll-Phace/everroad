@@ -23,8 +23,8 @@ export const CHUNK_LEN = 60;
  * Exported because `AHEAD * CHUNK_LEN` is where the ribbon stops, and two other
  * modules are sized against that distance: `main.ts`'s `FOG_BASE_DENSITY` is
  * chosen so the haze has closed over the cut by then, and `farLand.ts`'s
- * `FAR_LAND_HAZE_SCALE` is chosen so the backdrop meets it there at the same
- * haze. Moving this moves both.
+ * backdrop stands on the ground behind it, so it meets the cut at whatever
+ * haze the cut itself carries. Moving this moves both.
  */
 export const AHEAD = 22;
 /**
@@ -72,9 +72,9 @@ export const PLAY_BEHIND = 3;
  * fourteen-to-twenty-two. Twenty-two is a design choice laid on top of that:
  * it puts the tail at 1320 m, which is `AHEAD * CHUNK_LEN`, so the ribbon's
  * rear cut ends exactly as far out as its forward cut. One distance describes
- * both ends of the world, the same haze covers both, and the same
- * `FAR_LAND_HAZE_SCALE` backdrop meets both — with eight chunks of margin over
- * the shortest tail the sweep cannot tell it from.
+ * both ends of the world, the same haze covers both, and the same `farLand.ts`
+ * backdrop meets both — with eight chunks of margin over the shortest tail the
+ * sweep cannot tell it from.
  *
  * Haze is not the backstop for what the sweep still reports exposed. That sits
  * around 690 m, where the thinnest biome (`FOG_BASE_DENSITY` * `mist` 0.9)
@@ -93,8 +93,80 @@ export const MENU_BEHIND = AHEAD;
  * enough: the chase camera sits ~8 m back, so the only grass ever framed
  * behind the car is on the chunk it is currently leaving. How far the band
  * reaches *ahead* is the grass field's own per-quality number (`GrassTier`).
+ *
+ * Note what that argument is really about. It is a statement about the *eye*,
+ * and it holds only because in play the eye rides the car. When something else
+ * is holding the camera the band has to follow that instead — see `CoverEye`
+ * and `coverBand`, which is where the menu director's vantage enters.
  */
 export const GRASS_BEHIND = 1;
+
+/**
+ * Where the world is being *looked at* from, in road coordinates.
+ *
+ * Ground cover is a band around the camera, not around the car; driving, that
+ * distinction is free, because the chase camera trails the car by ~8 m and the
+ * two bands are the same band. Attract mode is where they come apart.
+ * `menuCamera`'s `roadsideStatic` stands as much as `MENU_MAX_LEAD` = 260 m
+ * ahead of the car and watches it approach down a 26 degree lens, and a band
+ * centred on the car ends `(ahead + 1)` to `(ahead + 2)` chunks in front of it
+ * — 180-240 m at `high`, 120-180 m at `low`. So the eye stood on bare ground
+ * with a hard cover edge across the middle distance while the car it was
+ * pointed at sat in grass (docs/ARCHITECTURE.md §5.7).
+ *
+ * Passed as a value rather than left as an assumption restated in two
+ * docblocks: the manager cannot know which rig is holding the camera, and the
+ * director must not have to know how cover is banded.
+ */
+export interface CoverEye {
+  /** Path distance of the eye along the road curve, in metres. */
+  readonly s: number;
+}
+
+/** Inclusive span of chunk indices that must carry ground cover. */
+export interface CoverBand {
+  /** First chunk in the band. */
+  lo: number;
+  /** Last chunk in the band, inclusive. */
+  hi: number;
+}
+
+/**
+ * The chunks ground cover is built for: the car's band, unioned with the eye's
+ * whenever something other than the chase camera is looking (`CoverEye`).
+ *
+ * The car's band is asymmetric — `GRASS_BEHIND` behind, the tier's `ahead` in
+ * front — because the rig that rides the car looks forward down the road. A
+ * cinematic eye has no such privileged direction: `craneReveal` rises ahead of
+ * the car and aims its look target 42 m *behind* it, and `overtake` opens 48 m
+ * back and drives past. So the eye carries the tier's reach on both sides of
+ * itself, and the rear cover edge lands `ahead` to `ahead + 1` chunks behind it
+ * — 120-180 m at `low`, 180-240 m at `medium` and `high`, at or past the ~150 m
+ * where a blade stops resolving.
+ *
+ * The result is one contiguous span rather than two, which is required and not
+ * merely convenient: from the `roadsideStatic` vantage the whole stretch of
+ * road between the eye and the car is in frame, and most of it is nearer to
+ * the lens than the car is.
+ *
+ * Pure, and writes into `out` so the frame loop allocates nothing.
+ */
+export function coverBand(
+  carS: number,
+  eye: CoverEye | null,
+  ahead: number,
+  out: CoverBand,
+): CoverBand {
+  const cur = Math.floor(carS / CHUNK_LEN);
+  out.lo = cur - GRASS_BEHIND;
+  out.hi = cur + ahead;
+  if (eye) {
+    const eyeCur = Math.floor(eye.s / CHUNK_LEN);
+    if (eyeCur - ahead < out.lo) out.lo = eyeCur - ahead;
+    if (eyeCur + ahead > out.hi) out.hi = eyeCur + ahead;
+  }
+  return out;
+}
 
 /** Roadside object the pickups system can near-miss against. */
 export interface Obstacle {
@@ -471,6 +543,8 @@ const COL_CREAM = new THREE.Color('#f2e5c0');
 export class ChunkManager {
   private chunks = new Map<number, Chunk>();
   private behindChunks = PLAY_BEHIND;
+  /** Reused by `updateCover` so the frame loop allocates nothing (§14). */
+  private readonly band: CoverBand = { lo: 0, hi: 0 };
   private mat = vertexToonMat();
   readonly root = new THREE.Group();
 
@@ -507,6 +581,17 @@ export class ChunkManager {
     this.behindChunks = Math.max(PLAY_BEHIND, Math.round(count));
   }
 
+  /**
+   * Build the ribbon for this frame: chunks in `[cur - behind, cur + AHEAD]`
+   * in, everything outside it disposed.
+   *
+   * Ground cover is **not** built here — `updateCover` is a separate pass, run
+   * later in the frame, and every caller of this owes a call to it. The split
+   * is an ordering constraint, not a tidy-up: this has to run *before* the
+   * camera, because the menu director samples the terrain these chunks own to
+   * pick and clear its vantage, while cover has to run *after* it, because
+   * cover is banded around wherever the camera ended up (see `updateCover`).
+   */
   update(carS: number): void {
     const cur = Math.floor(carS / CHUNK_LEN);
     const behind = this.behindChunks;
@@ -521,22 +606,40 @@ export class ChunkManager {
         this.chunks.delete(idx);
       }
     }
-    this.updateGrass(cur);
     this.path.prune(carS - behind * CHUNK_LEN - 100);
   }
 
   /**
-   * Add and remove ground cover so it covers only the near band around the
-   * car. Grass is invisible past ~150 m, so building it for all `AHEAD` chunks
-   * would pay 22 chunks of instance data for four chunks of benefit — and the
-   * per-frame cost of a chunk boundary is the whole budget here (§5.3, §14).
-   * At most one chunk is built per call in steady driving.
+   * Add and remove ground cover so it covers only the near band around
+   * whatever is looking at the world — the car, unioned with `eye` when
+   * something other than the chase camera is holding the frame (`coverBand`).
+   * Pass `null` for play. Grass is invisible past ~150 m, so building it for
+   * all `AHEAD` chunks would pay 22 chunks of instance data for four chunks of
+   * benefit — and the per-frame cost of a chunk boundary is the whole budget
+   * here (§5.3, §14).
+   *
+   * **Run this after the camera has been placed for the frame, not before.**
+   * That is the whole reason it is not part of `update`: the band has to be
+   * resolved against the vantage the frame is actually rendered from. Resolved
+   * a step too early it lags the eye by a frame, which nobody can see while the
+   * eye is walking — but a menu cut moves it up to `MENU_MAX_LEAD` in one step,
+   * and that frame renders a fresh vantage standing on bare ground. `main.ts`
+   * calls this straight after the camera block and `update` well before it;
+   * both call sites say so.
+   *
+   * Only chunks the ribbon is currently holding can be covered, so `carS` must
+   * be the one `update` was given this frame.
+   *
+   * At most one chunk is built per call in steady driving, in either mode: the
+   * band slides one chunk at a time whether the car or the eye is what moved.
+   * A menu *cut* is the deliberate exception — it builds every chunk the jump
+   * uncovered at once, a handful of chunk boundaries paid on the one frame
+   * where the whole image changes anyway.
    */
-  private updateGrass(cur: number): void {
+  updateCover(carS: number, eye: CoverEye | null): void {
     const field = this.grass;
     if (!field) return;
-    const lo = cur - GRASS_BEHIND;
-    const hi = cur + field.ahead;
+    const { lo, hi } = coverBand(carS, eye, field.ahead, this.band);
     for (const [idx, chunk] of this.chunks) {
       const wanted = idx >= lo && idx <= hi;
       if (wanted && chunk.grass && chunk.grassRev !== field.revision) {

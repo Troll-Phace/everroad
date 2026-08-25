@@ -15,7 +15,7 @@ import { BIOME_NAMES, BIOME_ORDER } from './types';
 import { Input } from './engine/input';
 import { DayNight } from './engine/daynight';
 import { RoadPath } from './world/roadPath';
-import { CHUNK_LEN, ChunkManager, MENU_BEHIND, PLAY_BEHIND } from './world/chunks';
+import { CHUNK_LEN, ChunkManager, MENU_BEHIND, PLAY_BEHIND, type CoverEye } from './world/chunks';
 import { GrassField, windStrength } from './world/grass';
 import { Sky } from './world/sky';
 import { FarLand } from './world/farLand';
@@ -163,23 +163,41 @@ const AERIAL_HAZE = new THREE.Color('#7b9cc0');
 const FOG_BIOME_TINT = 0.16;
 
 /**
- * How far the daylight fog is pulled from the sky's horizon colour toward
+ * How far up the dome the haze takes its base colour, 0 = horizon, 1 = zenith.
+ *
+ * Aerial perspective converges on the sky the land is seen *against*, and the
+ * land is not seen against the horizon: `world/farLand.ts` saturates to this
+ * colour at its crest, which sits 9.2-10.9° above a low eye, and the sky
+ * immediately over that crest is a degree or two higher still. The sky dome is
+ * `mix(uHorizon, uZenith, sqrt(dir.y))` (see the shader in `world/sky.ts`), so
+ * the colour at elevation θ is that mix at `sqrt(sin θ)` — 0.45 at 11.7°.
+ * Derived, then confirmed: at the meadow default the fan's top row lands within
+ * 5/255 of the sky pixel above it in every channel, against 12/7/26 before.
+ *
+ * This is what replaces `FOG_SHADE`, which used to darken the haze by a tenth
+ * so the far band would not dissolve into the horizon. That was a real problem
+ * with a flat lid for a backdrop and is not one now — the backdrop carries its
+ * own gradient from land colour at the foot of the band to air at the top — and
+ * measured against the sky, any shade at all re-opens the hard edge this
+ * removes: 0.03 of it puts 11/255 of blue back.
+ */
+const FOG_SKY_RISE = 0.45;
+
+/**
+ * How far the daylight fog is pulled from that sky colour toward
  * `AERIAL_HAZE`. Backed off through golden hour, where the scattered light
  * genuinely is warm and a blue haze would grey out the sunset, and to zero at
  * night, where the horizon is already dark and cool.
- */
-const FOG_AERIAL_MIX = 0.4;
-
-/**
- * How much darker than the sky the haze sits.
  *
- * Without it the far band matches the horizon exactly and the ridge dissolves
- * — which is precisely the lid `world/farLand.ts` exists to avoid. Distant
- * land reads as land because it is a little deeper in value than the air above
- * it; a tenth is enough to separate the silhouette without turning it into a
- * bruise.
+ * Was 0.4, which was most of the reason the backdrop stepped against the sky:
+ * `AERIAL_HAZE` is duller than the sky at every hour, so a heavy pull toward it
+ * lands the haze somewhere the sky never is. With the base colour now taken off
+ * the dome itself the mix has less work to do — it is the biome-independent
+ * blue that keeps mid-distance land from tinting the whole horizon, not the
+ * thing that decides the colour. Swept against the same measurement: 0.10 and
+ * 0.20 both sit further from the sky than this does.
  */
-const FOG_SHADE = 0.1;
+const FOG_AERIAL_MIX = 0.15;
 
 const scene = new THREE.Scene();
 // Replaced on the first rendered frame by the loop below; this is only what
@@ -487,6 +505,13 @@ function seedWorldAt(s: number): void {
   chunks.reset();
   vehicle.resetTo(s);
   pickups.reset(s);
+  // `path.reset` re-bases the curve's origin, so terrain heights are measured
+  // in a different world from here on and the backdrop's damped anchor is
+  // holding a number that no longer means anything.
+  farLand.reanchor();
+  // Ribbon only. Ground cover is banded around the camera, which has not been
+  // placed for the new position yet, so each caller runs `chunks.updateCover`
+  // once it has moved its own rig — see `enterMenu` and `startGame`.
   chunks.update(vehicle.s);
 
   const biome = biomeAt(vehicle.s, worldBiome);
@@ -510,6 +535,23 @@ function seedWorldAt(s: number): void {
  * screen is never credited — see `grantOfflineProgress`.
  */
 let menuEnteredMs = 0;
+
+/**
+ * The menu director's vantage, in the shape `ChunkManager` bands ground cover
+ * against (`world/chunks.ts`'s `CoverEye`). Attract mode is the only time the
+ * eye and the car are not the same place: `roadsideStatic` stands up to
+ * `MENU_MAX_LEAD` = 260 m ahead of the car, well past the far edge of a band
+ * centred on it.
+ *
+ * A live view of `menuCam.camS` rather than a copy, so it cannot be read stale
+ * and costs no allocation to hand over. Every reader takes it *after* the
+ * director has placed the eye for the frame — see `chunks.updateCover`.
+ */
+const menuCoverEye: CoverEye = {
+  get s(): number {
+    return menuCam.camS;
+  },
+};
 
 /**
  * Enter (or re-enter) the main menu: a randomly-drawn car in a randomly-drawn
@@ -555,6 +597,11 @@ function enterMenu(): void {
 
   menuCam.reset();
   menuCam.update(vehicle, 0);
+  // Ground cover is banded around the eye, so it is built once the director
+  // has placed one — the same order the frame loop keeps. Doing it here rather
+  // than leaving it to the first frame is what stops the menu opening on a
+  // vantage standing in bare dirt.
+  chunks.updateCover(vehicle.s, menuCoverEye);
 
   bus.emit('appModeChange', { mode: 'menu' });
 }
@@ -629,6 +676,11 @@ function startGame(kind: 'continue' | 'new'): void {
   // Cut, don't swoop: without this the chase rig would lerp in from wherever
   // the cinematic camera happened to be parked.
   chase.snapTo(vehicle);
+  // Cover for the rig that now holds the frame. No cinematic eye: the chase
+  // camera rides the car, so the band this resolves is the car's own — the
+  // same chunks play built before any of this existed. Built here, behind the
+  // UI's fade, rather than on the first rendered frame.
+  chunks.updateCover(vehicle.s, null);
 
   achTimer = 0;
   saveTimer = 0;
@@ -720,6 +772,10 @@ function frame(now: number): void {
   }
 
   const milesDelta = (vehicle.speedMps * dt) / 1609.34;
+  // Ribbon first, ground cover much later. This has to precede the camera
+  // block: the menu director samples the terrain these chunks own to choose
+  // and clear its vantage. The cover pass is the other half of it and runs
+  // *after* the camera, deliberately — see `chunks.updateCover` below.
   chunks.update(vehicle.s);
   pickups.update(dt, vehicle, milesDelta);
 
@@ -755,6 +811,15 @@ function frame(now: number): void {
   // weather would re-anchor kilometres away for one frame and snap back.
   if (menuMode) menuCam.update(vehicle, dt);
   else chase.update(vehicle, dt);
+
+  // Ground cover is banded around the eye, so it is resolved *after* the
+  // camera has been placed for this frame and never before it — moving this
+  // back up beside `chunks.update` re-opens the defect it was split out to
+  // fix, because a menu cut can jump the eye 260 m in one frame and that
+  // frame would render the fresh vantage standing on bare ground. Driving
+  // passes no eye at all: the chase rig rides the car, so the band is the
+  // car's and the play path builds exactly what it always built.
+  chunks.updateCover(vehicle.s, menuMode ? menuCoverEye : null);
 
   weather.update(
     dt,
@@ -802,17 +867,28 @@ function frame(now: number): void {
   // The active rig has already placed the camera for this frame, above.
   const camPos = chase.camera.position;
   sky.update(camPos, snap, vehicle.s, weather.auroraStrength, dt);
-  farLand.update(camPos, vehicle.s);
+  // The backdrop stands on the ground under the *camera*, so it takes the
+  // camera's own road coordinates — which in attract mode are the director's,
+  // as much as MENU_MAX_LEAD down the road from the car.
+  farLand.update(
+    path,
+    camPos,
+    menuMode ? menuCam.camS : vehicle.s,
+    menuMode ? menuCam.camLat : vehicle.lateral,
+    dt,
+  );
   postfx.setGolden(snap.golden, snap.elevation > -0.05);
 
-  // Fog: aerial perspective off the sky's own horizon, carrying a little of
-  // the biome's tint; density from mist/weather.
+  // Fog: aerial perspective off the sky the far land is actually seen against
+  // — not the horizon but a little way up the dome, where the backdrop's crest
+  // sits (FOG_SKY_RISE) — carrying a little of the biome's tint; density from
+  // mist/weather.
   blendColor(vehicle.s, (b) => b.fogTint, fogTint);
   fogColor
     .copy(sky.horizonColor)
+    .lerp(sky.zenithColor, FOG_SKY_RISE)
     .lerp(fogTint, FOG_BIOME_TINT * (1 - snap.nightness * 0.6))
-    .lerp(AERIAL_HAZE, FOG_AERIAL_MIX * (1 - snap.golden * 0.5) * (1 - snap.nightness))
-    .multiplyScalar(1 - FOG_SHADE * (1 - snap.nightness * 0.5));
+    .lerp(AERIAL_HAZE, FOG_AERIAL_MIX * (1 - snap.golden * 0.5) * (1 - snap.nightness));
   const fog = scene.fog as THREE.FogExp2;
   fog.color.copy(fogColor);
   // blendNumber uses the same road-position weights as every other biome

@@ -15,6 +15,24 @@ the generated module.
 
 ## [Unreleased]
 
+### Fixed
+
+- **The distance is country again, not a wall of milk.** Above the far fields
+  there used to be a flat grey-blue band with a hard edge along the top of it,
+  the same shade wherever you looked and whatever the weather. It has been
+  replaced by land that keeps going: hills standing at different distances, the
+  near ones still holding their colour, each one paler than the one in front
+  until the last of them dissolves into the sky with no seam to find. The
+  horizon now sits on the ground the road is crossing, so it rises and falls
+  with the country instead of riding along at eye level.
+- **The title screen's long lens no longer looks out over bare dirt.** Some
+  attract-mode shots plant the camera a couple of hundred metres down the road
+  and watch the car come to them — and the grass was only ever growing around
+  the car, so those shots opened on a patch of empty ground with a hard line
+  across the middle where the countryside started again. The ground cover now
+  follows the camera as well as the car, so wherever a shot stands, it stands
+  in grass.
+
 ## [0.1.21] - 2026-08-25
 
 ### Added

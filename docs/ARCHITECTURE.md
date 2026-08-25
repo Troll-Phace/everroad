@@ -384,19 +384,30 @@ camera position: the rebase block writes `camera.position` from the chase rig's
 pose, and in menu mode that pose is stale, so a weather read taken before the
 menu camera has run re-anchored particles kilometres away for one frame.
 
+The chunk manager runs in **two passes, on either side of the camera**, and
+that is a constraint rather than an accident. `chunks.update` has to precede the
+camera because the menu director samples the terrain those chunks own to choose
+and clear its vantage. `chunks.updateCover` has to follow it because ground
+cover is banded around wherever the camera ended up, and a menu cut moves that
+up to 260 m between one frame and the next — resolved with the ribbon instead,
+the frame a far cut lands renders a fresh vantage standing on bare ground
+(§5.7). Both call sites carry the reason; `chunks.test.ts` pins the property and
+that the loop still reads in that order.
+
 ```
 requestAnimationFrame:
   dt = clamp(now - last)              tab-throttle guard; dt never spikes
   input.update()                   -> steering axis, active mode, drift flag
   vehicle.update(dt)               -> advances s, lateralOffset, speed, drift
   daynight.update(dt)              -> timeOfDay, phase, sun position + color
-  weather.update(dt)               -> transitions (8 s fades), particles
   chunks.update(carS)              -> generate ahead, recycle behind
   pickups.update(dt)               -> collection, magnet, near-miss, combo
+  camera.update(dt)                -> chase rig, or the menu director
+  chunks.updateCover(carS, eye)    -> ground cover, banded around the camera
+  weather.update(dt)               -> transitions (8 s fades), particles
   economy.applyTick(state, ctx)    -> coinsEarned; the only currency writer
   achievements.check(...)          -> every ~1 s, batched; emits 'achievement'
   audio.update(mood)               -> only touches params that changed
-  camera.update(dt)
   postfx.render(dt)
   save.autosave                    -> every 5 s
 ```
@@ -565,7 +576,7 @@ down to a threshold.**
 22 rather than 14 is therefore a design argument, not a measurement. 1320 m is
 `AHEAD * CHUNK_LEN`, so the ribbon's rear cut ends exactly as far out as its
 forward cut: one number covers both ends of the world, met at both ends by the
-same haze and the same `FAR_LAND_HAZE_SCALE` backdrop — plus eight chunks of
+same haze and the same `world/farLand.ts` backdrop — plus eight chunks of
 margin over the shortest tail the sweep cannot tell it from. Note what the haze
 does *not* do here. Whatever the sweep still reports exposed sits around 690 m,
 where the thinnest biome (`FOG_BASE_DENSITY` × `mist` 0.9) leaves 47% of the
@@ -680,48 +691,110 @@ the effect is never built and a fan ordered after the disc erases it through
 the whole golden hour. That asymmetry between quality tiers is exactly the
 kind of bug a mid-quality playtest cannot see.
 
-It carries its own aerial perspective, and has to. The fan is a compressed
-stand-in — 4 km of geometry standing for tens of km of implied land — so its
-geometric radius is nowhere near the distance it depicts. Under the old fog that
-never showed, because everything past 400 m was saturated either way; at 0.0014
-it shows badly, because the ribbon's far edge 1320 m out is 96% hazed while the
-fan pixel directly above it is only 340 m away and 19% hazed. Left alone the
-backdrop stops being haze and becomes a vivid cone with a hard silhouette
-sitting on a pale strip of terrain — measured, and plainly visible on screen.
-`FAR_LAND_HAZE_SCALE = 4.5` fixes it by scaling the fan's **fog depth** in the
-vertex shader (a per-vertex `aHaze` attribute injected at `<fog_vertex>`), so it
-fogs on the distance it represents rather than the distance it occupies. The
-value is derived, not tuned: the nearest ring a horizon-grazing ray can meet is
-at radius 294.9 m, and `1320 / 294.9 = 4.477`. Rounding *up* matters, because
-the two directions are not symmetric — a backdrop hazier than the terrain in
-front of it is simply more recession, while one crisper than that terrain is the
-failure above. Scaling depth rather than baking a colour also keeps `mist`, the
-weather `fogMultiplier` and `nightness` working on the backdrop exactly as they
-work on the ribbon, and the density cancels out of `r * S >= AHEAD * CHUNK_LEN`,
-so the guarantee holds in every biome and weather rather than at one tuned
-density. Above about 5 there is nothing left to buy: 4.5 and 7 are
-indistinguishable on screen because the band is already saturated.
+It stands on the **ground under the camera**, not on the eye, and its profile is
+a height field in metres above that ground rather than a set of elevation angles
+from the lens. `FarLand.update` samples `terrainMeshHeight` at the camera's own
+road coordinates — the *camera's*, which in attract mode are the director's, as
+much as `MENU_MAX_LEAD` = 260 m from the car — and puts the mesh there, damped.
+Measured live over 600 frames of attract mode the anchor moves a median of
+0.012 m per frame and never jumps.
 
-Its elevation rises monotonically with radius, from 10° below the eye at
-120 m — well below ground level, so real terrain buries the inner rim wherever
-the ribbon still reaches that far; on the inside of the tightest bends the
-compressed ribbon stops nearer than 120 m and the fan simply shows through
-under the horizon, which is what it is for — to a ridge that is a **floor of
-7.6° with the wander folded upward**, occupying [7.6°, 9.0°] and never dipping
-below the floor at any azimuth. That one-sidedness is the guarantee and must not be "simplified"
-into a symmetric ±wander: the fan closes every gap below its silhouette and
-none above, so a symmetric wander dips below the floor on part of the circle
-and closure becomes a coincidence of azimuth. The floor is set by curvature —
-the tighter the bend, the nearer the ribbon edge on its outside and the higher
-its silhouette. On a straight the land silhouette tops out near 5.5°; at the
-road's tightest bends (R 92.4 at s ~21.1 km, R 91.3 at s ~99.1 km, R 88.7 at
-s ~431.6 km) it reaches 6.64°. Enclosed-sky pixels on a 1280x800 mask go from
-200 to 0 at the sunflower-coast repro and from 3500-6500 to 0, terrain-only,
-at those bends. The residual those measurements left — sky beneath scenery
-standing on a folded flap — went with the fold itself; the ribbon-edge
-silhouette at all three bends is lower now than when these figures were taken,
-so the fan has more margin, not less. Worth re-measuring on a playtest all the
-same.
+What the damping must not do is ease across a cut, which takes ~0.8 s to settle
+and is the only motion on screen during `roadsideStatic`. The snap therefore
+triggers on a jump in the **vantage** — `FAR_LAND_CUT_DISTANCE` = 8 m of
+movement in `(camS, camLat)` in one frame — and not on the ground height, which
+is the intuitive quantity and the wrong one: a cut is a discontinuity in where
+the camera *is*, and the ground it lands on may happen to be at a similar
+height. Thresholding the height damped 59% of `roadsideStatic` cuts, a median
+6.38 m of anchor move, which tilts the crest at 400 m by 0.92° — some 30 px of
+horizon drift down that shot's 26° lens. The vantage separates cleanly: over
+401 measured cuts the eye never moves more than 1.11 m per frame *within* a
+shot, while every cut that moves the ground by more than 2 m jumps it at least
+14.7 m, and the cuts this threshold still damps move the ground by at most
+0.34 m. `FarLand.reanchor` covers the one discontinuity no threshold can see —
+`seedWorldAt` re-bases `RoadPath`'s origin, so the height the anchor holds is
+measured in a world that no longer exists.
+
+That anchoring is the whole design, and it replaced a defect. Hanging the
+profile off the eye put the inner rings 15-20 m *below* ground level — a bowl —
+so the surface had to climb back out of its own hole before it could show, and
+it broke the horizon at a radius that had nothing to do with how far away that
+land was meant to be: a horizon-grazing ray met the fan at 295-380 m whatever
+the world beyond the ribbon looked like. That is why the backdrop needed
+`FAR_LAND_HAZE_SCALE = 4.5`, a fudge that fogged it as though it were four and a
+half times further away than it was. The scale did its job at the ridge and did
+real damage at the foot of the band: every visible ring fogged as at least
+1327 m, so the whole backdrop sat between 96% and 100% hazed. Sampled down its
+visible height at the meadow default, eight levels of blue from bottom to top —
+a flat slab, 5-22% of the frame depending on the shot, and the "milky fog in the
+distance" report.
+
+Grounded, the geometry is at its true distance and `scene.fog` is the whole
+story: no haze constant, no `aHaze` attribute, no shader injection. Nothing was
+lost at the far end, because past ~1.8 km `FogExp2` at `FOG_BASE_DENSITY` has
+taken everything anyway (2.8% of contrast survives at 1500 m, 0.2% at 2000 m),
+so scaling the outer rings buys only what saturation already gives. The same
+column now runs ~40% to 100% hazed: 82-113 levels of blue where there were
+eight.
+
+Per azimuth the surface is the upper envelope of three pieces: a **rim plane**
+`FAR_LAND_RIM_DROP` = 5 m under the anchor, a low **spur**, and the tall
+**range** that carries the silhouette. Each cone is `A·(r/R) - b·(1 - r/R)`, so
+`b` is exactly how far out that piece of land climbs into view, and both `A` and
+`b` are noise functions of azimuth — the horizon breaks at 260-740 m in some
+directions and past a kilometre in others, and the spur crosses under the range
+at a radius that wanders with it, leaving a crease that runs *around* the eye
+the way a real ridge does rather than radiating out from it. The relief that
+matters is not the silhouette's; it is which *distance* sits at a given
+elevation, because that is what the haze turns into layers.
+
+Two properties make the shape safe, and both are structural rather than tuned.
+**Elevation is monotonic in radius from every eye height**, because each cone's
+elevation is `(A + b)/R - (b + eye)/r`, which increases in `r` for any `b >= 0`
+and any eye at or above the anchor, and the upper envelope of such functions
+inherits it — so the surface never overlaps itself at 0.65 m (`heroLowFront`) or
+at 27 m (`craneReveal`). And **the silhouette clears every sky gap from every
+eye a shot can take**: the fan is continuous from rim to ridge so it covers
+every elevation between them, and `FAR_LAND_RIDGE_HEIGHT` = 650 m at 4 km
+clears `FAR_LAND_GAP_ANGLE_DEG` = 7.6° for any eye up to 116 m above the ground
+beneath it. Stating the guarantee as a height rather than an angle is the point:
+7.6° *from the eye* is a different promise at every eye height, and it had only
+ever been derived at one of them.
+
+7.6° is still the number, measured the same way — rendering the chunk meshes to
+a mask and reading the elevation of the topmost terrain pixel per column, the
+ribbon-edge silhouette on unfolded road tops out at 6.63° (s = 99.1 km, R 91.3 m,
+from a 1.6 m eye) and gaps live under it. The wander stays one-sided, folded
+upward off the floor, and must not be "simplified" into a symmetric ±wander: the
+fan closes every gap below its silhouette and none above, so a symmetric wander
+dips below the floor on part of the circle and closure becomes a coincidence of
+azimuth.
+
+`FAR_LAND_INNER_RADIUS` has a second job that is easy to miss and expensive to
+get wrong. With `FAR_LAND_RIM_DROP` it fixes the shallowest ray that can pass
+*under* the rim — `(drop + eye) / radius` of fall per metre — and anything
+steeper has to meet real terrain inside the ribbon or it escapes to the sky. The
+terrain is not obliging: it falls away from the road fast enough to outrun a
+shallow ray for a long way. Marched against `terrainHeight` over 6450 rays, the
+escape rate is 14% at 70 m over a 2 m drop, one ray at 20 m over 2.5 m, and zero
+at or past 20 m over 3 m. The shipped pair is 20 m and 5 m. The symptom of
+getting it wrong is specific: a band of sky two rows deep running the *whole
+width* of the frame at exactly the rim's elevation — 13,692 px of it at
+s = 431.6 km from a 0.65 m eye. The rim must also stay inside the ribbon on the
+inside of the tightest bend, where `foldSafeLateral` asymptotes at 74.5 m, which
+the old 120 m did not: that left 6075 px of wedge at the same position.
+
+Enclosed-sky pixels, measured terrain-only across six vantages (0.65 m to 27 m,
+26° to 62°) at the sunflower-coast repro (s = 6750) and the three tightest bends
+(s = 21.1 km, 99.1 km, 431.6 km): **0 in all 24, against 5 to 1,038,725 with the
+backdrop hidden.** The old build was also 0 in 21 of those 24 and left 6075,
+555 and 199 px at s = 431.6 km.
+
+The last of the milk was not geometry at all but the fog *colour*, which the
+band saturates to at its top — see `FOG_SKY_RISE` in §5.8. A backdrop that
+carries its own gradient no longer needs a fog colour held away from the sky to
+keep it legible, and the hard edge measured 28-32/255 of blue against the sky
+directly above it. It is now 0-5.
 
 Dash bleed at chunk seams and terrain winding after an axis flip have both been
 bugs here (commits `2a3856d`, `ebbdbe9`). New geometry work in this file should
@@ -866,7 +939,7 @@ a CPU transform of ~72k vertices per chunk; instancing costs one matrix each
 and still draws in one call. So the rule stands as it was: **one draw call per
 chunk**, and the mechanism differs only where the kind count collapses to one.
 
-Five things constrain the field:
+Six things constrain the field:
 
 - **A near band, not the `AHEAD` window.** Grass is invisible past ~150 m, so
   it is built only for `GRASS_BEHIND = 1` chunk behind the car and the tier's
@@ -874,6 +947,52 @@ Five things constrain the field:
   chunks. Meshes are added and dropped as the car advances, so the steady-state
   cost is **one chunk built per chunk boundary**, never a window rebuild. A
   build spike at a boundary is the regression to watch (§5.3, §14).
+- **The band is centred on the eye, not on the car.** Driving those are the
+  same thing — the chase camera trails the car by ~8 m — and play passes no eye
+  at all, so it builds exactly the chunks above. Attract mode is where they
+  come apart. `ChunkManager.updateCover` takes a `CoverEye` (a path distance,
+  nothing more) as a per-frame argument, and the pure `coverBand` returns the
+  union of the car's band and the eye's; `main.ts` passes
+  `menuMode ? menuCoverEye : null` on every frame, so a mode change cannot
+  leave a dead eye latched. Without it `roadsideStatic` — which stands
+  `clamp(speedMps * 5.4, 95, MENU_MAX_LEAD)` metres in front of the car, up to
+  260 m (§6.4) — looked out over bare terrain with a hard cover edge across the
+  middle distance while the car it was pointed at sat in grass. A car-centred
+  band ends `(ahead + 1)` to `(ahead + 2)` chunks ahead, so 180–240 m at `high`
+  and 120–180 m at `low`; the menu showcases any car in the catalog at its own
+  `baseSpeed`, and everything over ~50 mph put that eye outside its own cover.
+
+  The eye carries the tier's reach on **both** sides of itself, where the car
+  carries one chunk behind and `ahead` in front. That asymmetry was never about
+  the car: it is that the rig riding the car looks forward. A cinematic eye has
+  no privileged direction — `craneReveal` rises ahead of the car and walks its
+  look target 42 m *behind* it, `overtake` opens 48 m back — so the rear cover
+  edge sits `ahead` to `ahead + 1` chunks behind the eye, 180–240 m at `medium`
+  and `high` and 120–180 m at `low`, at or past where a blade stops resolving.
+  The union is one contiguous span rather than two, which is required and not
+  merely tidy: from the roadside vantage the whole 260 m between eye and car is
+  in frame and most of it is nearer the lens than the car is.
+
+  Because the band follows the camera, resolving it is a **separate pass that
+  runs after the camera**: `ChunkManager.update` builds the ribbon and
+  `ChunkManager.updateCover` bands the cover, and the frame loop puts the camera
+  between them (§4.2). Folding the two back together costs nothing while the eye
+  is walking — a dolly moves it a metre a frame — but a cut moves it 260 m in
+  one step, and that frame renders a fresh vantage standing on bare ground. Any
+  caller that re-seeds the world owes both calls; `seedWorldAt` runs the ribbon
+  and leaves cover to `enterMenu` and `startGame`, each of which runs it once it
+  has placed its own rig.
+
+  What it costs: measured over four minutes of attract mode per tier, the band
+  runs 1.1–2.2 chunks wider than the driving band on average and 6–7 wider at
+  its worst, which is a `roadsideStatic` take at the clamp — ten to twelve live
+  meshes against the menu's 45 chunks, never the window. Menu entry does not
+  move (58.9 → 58.8 ms, medians of nine live `enterMenu` calls at `high`),
+  because the first take is usually a near shot. The cost lands on a **cut**,
+  which builds however many chunks the eye jumped over — 9.6 ms for four at
+  `high`, on the one frame where the whole image changes anyway. Driving is
+  untouched: with no eye the union collapses to the car's band, one chunk built
+  per chunk boundary and nothing in between.
 - **Placement is on the drawn surface by construction.** Rather than scatter in
   `(s, lat)` and sample the surface back — `groundProp`'s route, at three
   `RoadPath.pose` lookups a prop — clusters are scattered *inside the terrain
@@ -977,18 +1096,41 @@ memory (§14).
 Colour is the other half, and it was the larger half of the *white*. The fog was
 the sky's horizon colour lerped **0.42** toward the biome `fogTint`; against an
 already pale daytime horizon that landed on a milky non-colour belonging to
-neither the sky nor the land. It is now built as aerial perspective: start from
-`sky.horizonColor`, take only `FOG_BIOME_TINT` (0.16) of the biome tint so the
-tint is an identity rather than the whole answer, pull `FOG_AERIAL_MIX` toward
-`AERIAL_HAZE` (a desaturated sky blue — scattered light is the same blue the sky
-is), and finally darken by `FOG_SHADE`. That last step is what keeps the far
-ridge legible: distant land reads as land because it sits a little deeper in
-value than the air above it, and a fog colour identical to the horizon dissolves
-the silhouette into the sky. The aerial mix backs off through golden hour, where
-the scattered light genuinely is warm, and to zero at night.
+neither the sky nor the land. It is now built as aerial perspective, which
+converges on the sky the land is seen *against*:
 
-The backdrop has to be told about all this separately — see
-`FAR_LAND_HAZE_SCALE` in §5.3, and the module comment in `world/farLand.ts`.
+1. start from `sky.horizonColor` and rise `FOG_SKY_RISE` (0.45) of the way to
+   `sky.zenithColor`;
+2. take `FOG_BIOME_TINT` (0.16) of the biome tint, so the tint is an identity —
+   Emberwood's haze warmer than Mistpine's — rather than the whole answer;
+3. pull `FOG_AERIAL_MIX` (0.15) toward `AERIAL_HAZE`, a desaturated sky blue,
+   backed off through golden hour where the scattered light genuinely is warm
+   and to zero at night.
+
+The rise is the step that kills the horizon's hard edge, and it is derived
+rather than tuned. Distant land is not seen against the *horizon*: the backdrop
+in §5.3 saturates to this colour at its crest, which sits 9.2-10.9° above a low
+eye, and the sky immediately over that crest is a degree or two higher still.
+The dome is `mix(uHorizon, uZenith, sqrt(dir.y))` (the shader in `world/sky.ts`),
+so the sky at elevation θ is that mix at `sqrt(sin θ)` — 0.45 at 11.7°. Measured
+at the meadow default, the backdrop's top row lands within 5/255 of the sky
+pixel above it in every channel, against 12/7/26 before.
+
+`FOG_SHADE` is gone with it. It darkened the haze by a tenth so the far band
+would not dissolve into the horizon, which was a real problem when the backdrop
+was a flat lid and is not one now that it carries its own gradient — and swept
+against the same measurement, any shade at all re-opens the edge: 0.03 of it
+puts 11/255 of blue back. `FOG_AERIAL_MIX` came down from 0.40 for the same
+reason: `AERIAL_HAZE` is duller than the sky at every hour, so a heavy pull
+toward it lands the haze somewhere the sky never is.
+
+One residual, unchanged by this and worth knowing about: at night the fan's top
+edge still reads about 40/255 brighter than the sky above it. The sky dome is a
+raw `ShaderMaterial` and so skips ACES tone mapping, while the fogged fan does
+not, and no fog colour can close a gap that the two paths open in the encoding.
+
+The backdrop needs no separate haze treatment any more — it fogs on its own true
+distance. See §5.3 and the module comment in `world/farLand.ts`.
 
 `PostFX` composes god rays (pmndrs `GodRaysEffect` on the sun disc), bloom,
 vignette, and SMAA. The quality setting (`low | medium | high`) scales this
@@ -1608,7 +1750,7 @@ them live.
 | Live coin instances | ≤ 160 | `COIN_CAP` |
 | Draw calls | One per chunk for merged scenery, one more for its grass | A per-object draw call in `scenery.ts` is a regression. Measured 98 -> 102 for the whole scene when the grass band is added |
 | Per-chunk build | ~2 ms at `quality: high` | 1.81 ms before the density overhaul; 0.82 ms for the merged bake alone after it, 1.97 ms with `high` grass. One chunk is built per chunk boundary, never a window |
-| Grass band | 4-5 live `InstancedMesh`es, 1800-12000 clusters | `GRASS_TIERS` x `GRASS_BEHIND`. Never the `AHEAD` window |
+| Grass band | 4-5 live `InstancedMesh`es driving, 7-12 in the menu | `GRASS_TIERS` x `coverBand`. Driving is 1800-12000 clusters; the menu band is the union of the car's and the director's eye (§5.7) and peaks around 28800 at `high`. Never the `AHEAD` window in either mode |
 | Cold start to playable | Under ~3 s on a warm cache | Nothing is fetched; the loading screen covers scene construction |
 | Bundle | Well under the 1500 kB Vite warning ceiling | Three.js dominates; a new dependency needs a reason |
 | Handcrafted models | ≤ 120 kB of decoded geometry across all of them | Enforced by `npm run models`; a scenery proto should sit near its procedural counterpart's triangle count, not the ceiling |
@@ -1678,9 +1820,10 @@ them live.
 | Scenery `density` per chunk | 68-94 by biome | `world/biomes.ts` |
 | `DS` / `ROAD_HALF_WIDTH` / `LANE_OFFSET` | 2 m / 4.6 m / 2.1 m | `world/roadPath.ts` |
 | `FOG_BASE_DENSITY` | 0.0014 | `main.ts` |
-| `FOG_BIOME_TINT` / `FOG_AERIAL_MIX` / `FOG_SHADE` | 0.16 / 0.40 / 0.10 | `main.ts` |
+| `FOG_BIOME_TINT` / `FOG_AERIAL_MIX` / `FOG_SKY_RISE` | 0.16 / 0.15 / 0.45 | `main.ts` |
 | `FOG_FULL` / `RAIN_HAZE` | 4.4 / 0.9 | `world/weather.ts` |
-| `FAR_LAND_HAZE_SCALE` / `FAR_LAND_HAZE_RAMP_T` | 4.5 / 0.25 | `world/farLand.ts` |
+| `FAR_LAND_INNER_RADIUS` / `FAR_LAND_RIM_DROP` | 20 m / 5 m | `world/farLand.ts` |
+| `FAR_LAND_RIDGE_HEIGHT` / `FAR_LAND_GAP_ANGLE_DEG` | 650 m / 7.6° | `world/farLand.ts` |
 | `CYCLE_SEC` | 545 s | `engine/daynight.ts` |
 | `HOLD_TIMEOUT` | 4 s | `engine/input.ts` |
 | `MAX_LATERAL` | 6.6 m | `world/vehicle.ts` |
