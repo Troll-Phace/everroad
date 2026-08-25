@@ -10,10 +10,23 @@ import {
   type SceneryKind,
 } from './biomes';
 import { getProto } from './scenery';
+// Type-only: grass.ts imports this module for the terrain grid, so a value
+// import here would close the cycle and put TER_COLS in the temporal dead zone
+// while grass.ts builds its band table at module scope.
+import type { GrassField } from './grass';
 import { vertexToonMat, rng, noise2, jitterColor } from './materials';
 
 export const CHUNK_LEN = 60;
-const AHEAD = 22; // chunks ahead of the car (~1.3 km)
+/**
+ * Chunks generated ahead of the car (~1.3 km).
+ *
+ * Exported because `AHEAD * CHUNK_LEN` is where the ribbon stops, and two other
+ * modules are sized against that distance: `main.ts`'s `FOG_BASE_DENSITY` is
+ * chosen so the haze has closed over the cut by then, and `farLand.ts`'s
+ * `FAR_LAND_HAZE_SCALE` is chosen so the backdrop meets it there at the same
+ * haze. Moving this moves both.
+ */
+export const AHEAD = 22;
 /**
  * Chunks retained behind the car while driving. The chase camera sits ~8 m
  * back and looks forward, so nothing ever sees the rear boundary in play and
@@ -26,19 +39,62 @@ export const PLAY_BEHIND = 3;
  * The menu director is the only rig that ever looks *back* down the road, and
  * several of its shots stand ahead of the car to do it — `roadsideStatic`
  * anchors as much as `MENU_MAX_LEAD` metres in front of it. At `PLAY_BEHIND`
- * the ribbon ends 180 m behind the car, which from those vantages is 200-440 m
- * from the eye. `FogExp2` at the thinnest density the biomes ask for
- * (0.0038 * 0.9) leaves 25-90% of that distance's contrast intact, so the cut
- * reads as a stepped cliff with haze under the props standing on its lip —
- * the "terrain unloading behind the car" report.
+ * the ribbon ends 180 m behind the car, and the cut reads as a stepped cliff
+ * with haze under the props standing on its lip — the "terrain unloading
+ * behind the car" report. Measured on the live attract mode, 24 of its samples
+ * are directly visible, the nearest at 193 m.
  *
- * Ten chunks puts the boundary 600 m behind the car, which is
- * `MENU_SAFE_DISTANCE` even for a shot riding level with the car, and the same
- * fog leaves under 2% of it. The cost — seven chunks of terrain, road and
- * scenery over the driving budget — is paid only while the menu is up.
- * `menuCamera.test.ts` holds the two numbers together.
+ * Ten chunks did not fix that, and the arithmetic that said it did was the
+ * wrong arithmetic. It reasoned from a euclidean distance — 600 m of tail, at
+ * which `FogExp2` at the thinnest density the biomes then asked for
+ * (0.0038 * 0.9) left under 2% of contrast. But `RoadPath` winds hard enough
+ * to double back on itself, so 600 m *along the arc* is 250-350 m from the eye,
+ * and lengthening the tail moves that number around at random rather than
+ * pushing it away: across seven start positions the nearest framed cut sat at
+ * 244-558 m for every tail from 6 to 27 chunks, with no trend. Raycast against
+ * the live chunk meshes, the cut was directly visible in every one of 191
+ * framed samples at ten chunks, nearest 267 m.
+ *
+ * What hides it is the land in between: past roughly 800 m of tail, a rolling
+ * height field over a winding road usually has a crest in the way. What that
+ * buys is *distance*, and distance is the one thing the offline sweep in
+ * `menuCamera.test.ts` measures dependably. The nearest exposed point of the
+ * cut moves 169 m -> 460 m -> 705 m as the tail goes three -> ten -> fourteen
+ * chunks, and then stops moving: 705 m at fourteen, 737 at sixteen, 765 at
+ * eighteen, 688 at twenty-two — not even monotonic. Its exposure *rate*
+ * separates them no better (0.37, 0.20, 0.26, 0.12 of framed samples). Any tail
+ * from fourteen up is the same tail to that instrument, which over-reports
+ * exposure besides. Raycast live against the real meshes the cut closed
+ * entirely at eighteen and twenty-two, but those rows are single runs of very
+ * unequal length and are worth only their shape (§5.3).
+ *
+ * So the measurement rules out three and ten, and cannot choose within
+ * fourteen-to-twenty-two. Twenty-two is a design choice laid on top of that:
+ * it puts the tail at 1320 m, which is `AHEAD * CHUNK_LEN`, so the ribbon's
+ * rear cut ends exactly as far out as its forward cut. One distance describes
+ * both ends of the world, the same haze covers both, and the same
+ * `FAR_LAND_HAZE_SCALE` backdrop meets both — with eight chunks of margin over
+ * the shortest tail the sweep cannot tell it from.
+ *
+ * Haze is not the backstop for what the sweep still reports exposed. That sits
+ * around 690 m, where the thinnest biome (`FOG_BASE_DENSITY` * `mist` 0.9)
+ * leaves 47% of the cut's contrast; the haze only reaches 6.3% at the 1320 m
+ * the tail itself ends at, and that is the *forward* cut's distance, not this
+ * one. At 690 m the occluding terrain is the whole mechanism.
+ *
+ * The cost — nineteen chunks of terrain, road and scenery over the driving
+ * budget — is paid only while the menu is up. `menuCamera.test.ts` holds the
+ * two numbers together.
  */
-export const MENU_BEHIND = 10;
+export const MENU_BEHIND = AHEAD;
+
+/**
+ * Chunks of dense ground cover retained behind the car's own chunk. One is
+ * enough: the chase camera sits ~8 m back, so the only grass ever framed
+ * behind the car is on the chunk it is currently leaving. How far the band
+ * reaches *ahead* is the grass field's own per-quality number (`GrassTier`).
+ */
+export const GRASS_BEHIND = 1;
 
 /** Roadside object the pickups system can near-miss against. */
 export interface Obstacle {
@@ -53,6 +109,16 @@ interface Chunk {
   group: THREE.Group;
   obstacles: Obstacle[];
   geos: THREE.BufferGeometry[];
+  /** Instanced ground cover, present only inside the near grass band. */
+  grass: THREE.InstancedMesh | null;
+  /**
+   * `GrassField.revision` the mesh in `grass` was built under, or -1 when the
+   * chunk carries none. Typed and held here rather than stamped on the mesh's
+   * `userData` (which is `Record<string, any>` and would let a renamed or
+   * dropped stamp read `undefined` forever — rebuilding every band chunk every
+   * frame with nothing to catch it).
+   */
+  grassRev: number;
 }
 
 /**
@@ -69,6 +135,38 @@ export const TER_COLS = [
  * land on the same absolute s in every chunk and seams stay watertight.
  */
 export const TER_ROW_STEP = 6;
+
+/** Floats `terrainRow` writes per column: world x, y, z, then effective lat. */
+export const TERRAIN_ROW_STRIDE = 4;
+
+const rowP = new THREE.Vector3();
+/** One row of `terrainRow` output, reused by every terrain build. */
+let terrainScratch = new Float64Array(16 * TERRAIN_ROW_STRIDE);
+
+/**
+ * One row of terrain grid vertices at path distance `s`, written into `out` at
+ * `offset` as `TERRAIN_ROW_STRIDE` floats per `TER_COLS` column: world x, y, z
+ * and the *effective* lateral that column landed at once the far-field
+ * compression has had its say.
+ *
+ * `buildTerrain` fills its own vertex buffer from this, so anything else that
+ * needs the surface the renderer draws — `world/grass.ts` scatters inside these
+ * cells — walks the identical grid by construction rather than by agreement
+ * (docs/ARCHITECTURE.md §5.3).
+ */
+export function terrainRow(path: RoadPath, s: number, out: Float64Array, offset = 0): void {
+  const roadY = path.elevation(s);
+  const kappa = path.curvature(s);
+  for (let j = 0; j < TER_COLS.length; j++) {
+    const lat = foldSafeLateral(kappa, TER_COLS[j]);
+    path.pointAtEffective(s, lat, rowP);
+    const k = offset + j * TERRAIN_ROW_STRIDE;
+    out[k] = rowP.x;
+    out[k + 1] = landHeight(roadY, s, lat);
+    out[k + 2] = rowP.z;
+    out[k + 3] = lat;
+  }
+}
 
 /**
  * The land height field at (s, lat) given the road's own elevation there.
@@ -379,6 +477,14 @@ export class ChunkManager {
   constructor(
     private path: RoadPath,
     private scene: THREE.Scene,
+    /**
+     * Dense ground cover, or omitted when a caller wants bare chunks (the
+     * tests do). The field owns the proto, the material and the wind; the
+     * manager owns only *which* chunks currently carry it, because grass lives
+     * on the chunk group and inherits its rebase/cull/dispose lifecycle
+     * (docs/ARCHITECTURE.md §5.7).
+     */
+    private grass: GrassField | null = null,
   ) {
     scene.add(this.root);
   }
@@ -410,11 +516,57 @@ export class ChunkManager {
     for (const [idx, chunk] of this.chunks) {
       if (idx < cur - behind || idx > cur + AHEAD) {
         this.root.remove(chunk.group);
+        this.dropGrass(chunk);
         for (const g of chunk.geos) g.dispose();
         this.chunks.delete(idx);
       }
     }
+    this.updateGrass(cur);
     this.path.prune(carS - behind * CHUNK_LEN - 100);
+  }
+
+  /**
+   * Add and remove ground cover so it covers only the near band around the
+   * car. Grass is invisible past ~150 m, so building it for all `AHEAD` chunks
+   * would pay 22 chunks of instance data for four chunks of benefit — and the
+   * per-frame cost of a chunk boundary is the whole budget here (§5.3, §14).
+   * At most one chunk is built per call in steady driving.
+   */
+  private updateGrass(cur: number): void {
+    const field = this.grass;
+    if (!field) return;
+    const lo = cur - GRASS_BEHIND;
+    const hi = cur + field.ahead;
+    for (const [idx, chunk] of this.chunks) {
+      const wanted = idx >= lo && idx <= hi;
+      if (wanted && chunk.grass && chunk.grassRev !== field.revision) {
+        // Quality changed under this chunk: drop it and rebuild below.
+        this.dropGrass(chunk);
+      }
+      if (wanted && !chunk.grass) {
+        const mesh = field.build(this.path, idx, chunk.group.position);
+        if (mesh) {
+          // Stamped so the band a mesh belongs to is readable without
+          // reconstructing it from the group's place in the child list.
+          mesh.userData.chunkIndex = idx;
+          chunk.group.add(mesh);
+          chunk.grass = mesh;
+          chunk.grassRev = field.revision;
+        }
+      } else if (!wanted && chunk.grass) {
+        this.dropGrass(chunk);
+      }
+    }
+  }
+
+  /** Detach and release one chunk's grass. The proto/material are shared. */
+  private dropGrass(chunk: Chunk): void {
+    if (!chunk.grass) return;
+    chunk.group.remove(chunk.grass);
+    chunk.grass.geometry.dispose();
+    chunk.grass.dispose();
+    chunk.grass = null;
+    chunk.grassRev = -1;
   }
 
   /**
@@ -425,6 +577,7 @@ export class ChunkManager {
   reset(): void {
     for (const chunk of this.chunks.values()) {
       this.root.remove(chunk.group);
+      this.dropGrass(chunk);
       for (const g of chunk.geos) g.dispose();
     }
     this.chunks.clear();
@@ -487,7 +640,7 @@ export class ChunkManager {
     }
 
     this.root.add(group);
-    this.chunks.set(index, { index, group, obstacles, geos });
+    this.chunks.set(index, { index, group, obstacles, geos, grass: null, grassRev: -1 });
   }
 
   private buildRoad(s0: number, s1: number, anchor: THREE.Vector3): THREE.Mesh {
@@ -540,27 +693,30 @@ export class ChunkManager {
     const cols = TER_COLS.length;
     const pos = new Float32Array(rows * cols * 3);
     const col = new Float32Array(rows * cols * 3);
-    const p = new THREE.Vector3();
     const ground = new THREE.Color();
     const groundAlt = new THREE.Color();
     const mixed = new THREE.Color();
+    if (terrainScratch.length < cols * TERRAIN_ROW_STRIDE) {
+      terrainScratch = new Float64Array(cols * TERRAIN_ROW_STRIDE);
+    }
 
     for (let r = 0; r < rows; r++) {
       const s = s0 + r * TER_ROW_STEP;
-      const roadY = this.path.elevation(s);
-      const kappa = this.path.curvature(s);
       blendColor(s, (b) => b.ground, ground);
       blendColor(s, (b) => b.groundAlt, groundAlt);
+      // The one place the drawn surface is defined. grass.ts walks the same
+      // rows, so its clusters cannot drift off the triangles drawn here.
+      terrainRow(this.path, s, terrainScratch);
       for (let j = 0; j < cols; j++) {
         // Where this column actually lands once the far field has been
         // compressed away from the fold. Height and colour both key off it, so
         // the land reads at the size of the ground it covers.
-        const lat = foldSafeLateral(kappa, TER_COLS[j]);
-        this.path.pointAtEffective(s, lat, p);
+        const g = j * TERRAIN_ROW_STRIDE;
+        const lat = terrainScratch[g + 3];
         const k = (r * cols + j) * 3;
-        pos[k] = p.x - anchor.x;
-        pos[k + 1] = landHeight(roadY, s, lat);
-        pos[k + 2] = p.z - anchor.z;
+        pos[k] = terrainScratch[g] - anchor.x;
+        pos[k + 1] = terrainScratch[g + 1];
+        pos[k + 2] = terrainScratch[g + 2] - anchor.z;
         // Color: noise blend between ground tones + gentle brightness wobble.
         const t = noise2(s * 0.02 + 7, lat * 0.03) * 0.5 + 0.5;
         mixed.copy(ground).lerp(groundAlt, t);
@@ -593,9 +749,6 @@ export class ChunkManager {
       blendNumber(s0 + CHUNK_LEN / 2, (b) => b.density) * (0.85 + r() * 0.3),
     );
 
-    const posOut: number[] = [];
-    const normOut: number[] = [];
-    const colOut: number[] = [];
     const m = new THREE.Matrix4();
     const q = new THREE.Quaternion();
     const vec = new THREE.Vector3();
@@ -604,31 +757,44 @@ export class ChunkManager {
     const tint = new THREE.Color();
     const worldP = new THREE.Vector3();
 
+    // ---- pass 1: place. Props arrive in seeded clumps rather than one at a
+    // time — a grove of four oaks and a clearing reads several times denser
+    // than the same four oaks sprinkled evenly (docs/ARCHITECTURE.md §5.7).
+    ensurePlacements(count);
+    const place = placements;
+    place.kind.length = 0;
+    place.n = 0;
+    let vertexTotal = 0;
+    let clumpLeft = 0;
+    let clumpKind: SceneryKind = 'grassTuft';
+    let clumpS = s0;
+    let clumpLat = 0;
+    let clumpSide = 1;
+    let clumpSpread = 0;
+    let clumpLatSpread = 0;
+
     for (let i = 0; i < count; i++) {
-      const s = s0 + r() * (s1 - s0);
-      const kind = pickScenery(s, r());
-      const proto = getProto(kind);
-      const side = r() < 0.5 ? -1 : 1;
-      let lat: number;
-      switch (kind) {
-        case 'fence':
-        case 'hay':
-          lat = side * (6.8 + r() * 6);
-          break;
-        case 'windmill':
-          lat = side * (45 + r() * 90);
-          break;
-        case 'sunflowerPatch':
-        case 'lavenderRow':
-          lat = side * (9 + r() * 55);
-          break;
-        case 'flowers':
-        case 'grassTuft':
-          lat = side * (6.5 + r() * 40);
-          break;
-        default:
-          lat = side * (10.5 + r() * 128);
+      if (clumpLeft <= 0) {
+        const u = r();
+        clumpKind = pickScenery(s0 + u * CHUNK_LEN, r());
+        clumpSide = r() < 0.5 ? -1 : 1;
+        clumpLat = clumpSide * latBandFor(clumpKind, r);
+        const rule = CLUMP[clumpKind];
+        clumpSpread = rule.spread;
+        clumpLatSpread = rule.spread * rule.lateral;
+        // Anchors are inset by the run's own reach, so every member of a clump
+        // lands inside this chunk and nothing straddles a seam.
+        clumpS = s0 + clumpSpread + u * (CHUNK_LEN - 2 * clumpSpread);
+        clumpLeft = rule.min + Math.floor(r() * (rule.max - rule.min + 1));
       }
+      clumpLeft--;
+      const kind = clumpKind;
+      const s = clumpSpread > 0 ? clumpS + (r() - 0.5) * 2 * clumpSpread : clumpS;
+      // Members stay on their clump's side of the road and off the shoulder.
+      const lat =
+        clumpLatSpread > 0
+          ? clumpSide * Math.max(6, Math.abs(clumpLat) + (r() - 0.5) * 2 * clumpLatSpread)
+          : clumpLat;
 
       let scale =
         kind === 'windmill'
@@ -637,13 +803,7 @@ export class ChunkManager {
             ? 0.6 + r() * 1.1
             : 0.75 + r() * 0.6;
       // Keep trees hugging the road smaller so canopies never swallow the camera.
-      const isTree =
-        kind === 'oak' ||
-        kind === 'maple' ||
-        kind === 'pine' ||
-        kind === 'poplar' ||
-        kind === 'cherryTree';
-      if (isTree && Math.abs(lat) < 17) scale = Math.min(scale, 0.9);
+      if (TREE_KINDS.has(kind) && Math.abs(lat) < 17) scale = Math.min(scale, 0.9);
 
       // Rows and fences align with the road; everything else spins freely.
       const heading = this.path.heading(s);
@@ -652,45 +812,92 @@ export class ChunkManager {
           ? heading + Math.PI / 2 + (r() - 0.5) * 0.15
           : r() * Math.PI * 2;
 
+      // Instance tint: canopy/flower/rock palette blended at s. Drawn here so
+      // the seeded stream is consumed in placement order, not bake order.
+      pickTint(s, kind, r, tint);
+
+      const k = place.n;
+      place.kind.push(kind);
+      place.s[k] = s;
+      place.lat[k] = lat;
+      place.scale[k] = scale;
+      place.yaw[k] = yaw;
+      place.tint[k * 3] = tint.r;
+      place.tint[k * 3 + 1] = tint.g;
+      place.tint[k * 3 + 2] = tint.b;
+      place.n++;
+      vertexTotal += getProto(kind).vertexCount;
+
+      // Near-shoulder solid objects become near-miss targets.
+      if ((kind === 'hay' || kind === 'rock' || kind === 'fence') && Math.abs(lat) < 10) {
+        const radius = getProto(kind).radius;
+        obstacles.push({ s, lateral: lat, radius: radius * scale, key: `${index}:${i}` });
+      }
+    }
+
+    if (!vertexTotal) return null;
+
+    // ---- pass 2: bake. The buffers are sized up front from the pass-1 vertex
+    // total; growing three `number[]`s by ~150k pushes was the bulk of this
+    // method's cost before the density went up (§5.3's build-spike budget).
+    const posOut = new Float32Array(vertexTotal * 3);
+    const normOut = new Float32Array(vertexTotal * 3);
+    const colOut = new Float32Array(vertexTotal * 3);
+    let w = 0;
+
+    for (let i = 0; i < place.n; i++) {
+      const kind = place.kind[i];
+      const proto = getProto(kind);
+      const s = place.s[i];
+      const lat = place.lat[i];
+      const yaw = place.yaw[i];
+
       this.path.point(s, lat, worldP);
       // Ground to the terrain as drawn, not to the height field the mesh only
       // samples at its grid vertices — between them they differ by metres.
       const y = groundProp(this.path, s, lat, kind, yaw, q);
 
-      // Instance tint: canopy/flower/rock palette blended at s.
-      pickTint(s, kind, r, tint);
-
-      m.compose(vec.set(worldP.x - anchor.x, y, worldP.z - anchor.z), q, tmpScale.setScalar(scale));
+      m.compose(
+        vec.set(worldP.x - anchor.x, y, worldP.z - anchor.z),
+        q,
+        tmpScale.setScalar(place.scale[i]),
+      );
       nm.getNormalMatrix(m);
+      const tr = place.tint[i * 3];
+      const tg = place.tint[i * 3 + 1];
+      const tb = place.tint[i * 3 + 2];
 
-      const { pos, norm, baked, shade, mask, vertexCount, radius } = proto;
+      const { pos, norm, baked, shade, mask, vertexCount } = proto;
       for (let vI = 0; vI < vertexCount; vI++) {
         vec.set(pos[vI * 3], pos[vI * 3 + 1], pos[vI * 3 + 2]).applyMatrix4(m);
         nrm
           .set(norm[vI * 3], norm[vI * 3 + 1], norm[vI * 3 + 2])
           .applyMatrix3(nm)
           .normalize();
-        posOut.push(vec.x, vec.y, vec.z);
-        normOut.push(nrm.x, nrm.y, nrm.z);
+        posOut[w] = vec.x;
+        normOut[w] = nrm.x;
+        posOut[w + 1] = vec.y;
+        normOut[w + 1] = nrm.y;
+        posOut[w + 2] = vec.z;
+        normOut[w + 2] = nrm.z;
         const sh = shade[vI];
         if (mask[vI] > 0.5) {
-          colOut.push(tint.r * sh, tint.g * sh, tint.b * sh);
+          colOut[w] = tr * sh;
+          colOut[w + 1] = tg * sh;
+          colOut[w + 2] = tb * sh;
         } else {
-          colOut.push(baked[vI * 3] * sh, baked[vI * 3 + 1] * sh, baked[vI * 3 + 2] * sh);
+          colOut[w] = baked[vI * 3] * sh;
+          colOut[w + 1] = baked[vI * 3 + 1] * sh;
+          colOut[w + 2] = baked[vI * 3 + 2] * sh;
         }
-      }
-
-      // Near-shoulder solid objects become near-miss targets.
-      if ((kind === 'hay' || kind === 'rock' || kind === 'fence') && Math.abs(lat) < 10) {
-        obstacles.push({ s, lateral: lat, radius: radius * scale, key: `${index}:${i}` });
+        w += 3;
       }
     }
 
-    if (!posOut.length) return null;
     const geo = new THREE.BufferGeometry();
-    geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(posOut), 3));
-    geo.setAttribute('normal', new THREE.BufferAttribute(new Float32Array(normOut), 3));
-    geo.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colOut), 3));
+    geo.setAttribute('position', new THREE.BufferAttribute(posOut, 3));
+    geo.setAttribute('normal', new THREE.BufferAttribute(normOut, 3));
+    geo.setAttribute('color', new THREE.BufferAttribute(colOut, 3));
     const mesh = new THREE.Mesh(geo, this.mat);
     mesh.castShadow = true;
     mesh.receiveShadow = true;
@@ -699,6 +906,104 @@ export class ChunkManager {
 }
 
 const tmpScale = new THREE.Vector3();
+
+/** Kinds that get the near-road canopy clamp. */
+const TREE_KINDS = new Set<SceneryKind>(['oak', 'maple', 'pine', 'poplar', 'cherryTree']);
+
+/** How props of one kind gather into a run. */
+interface ClumpRule {
+  /** Fewest / most props emitted from a single clump anchor. */
+  min: number;
+  max: number;
+  /** Scatter of the run along s, in meters either side of the anchor. */
+  spread: number;
+  /** Lateral scatter as a fraction of `spread` — rows stay narrow. */
+  lateral: number;
+}
+
+/**
+ * Clumping table. Scenery is emitted in seeded runs rather than as independent
+ * placements: at the same count, groves and drifts read several times denser
+ * than an even sprinkle, and the gaps between them are what make the density
+ * legible as landscape (docs/ARCHITECTURE.md §5.7).
+ *
+ * `spread` stays well under `CHUNK_LEN / 2` because a clump anchor is inset by
+ * its own reach so no run crosses a chunk seam.
+ */
+const CLUMP: Record<SceneryKind, ClumpRule> = {
+  oak: { min: 1, max: 4, spread: 7, lateral: 0.9 },
+  maple: { min: 1, max: 4, spread: 7, lateral: 0.9 },
+  pine: { min: 2, max: 5, spread: 7.5, lateral: 0.9 },
+  poplar: { min: 1, max: 3, spread: 6, lateral: 0.8 },
+  cherryTree: { min: 1, max: 4, spread: 7, lateral: 0.9 },
+  rock: { min: 1, max: 3, spread: 2.6, lateral: 1 },
+  flowers: { min: 3, max: 8, spread: 4.5, lateral: 1 },
+  grassTuft: { min: 2, max: 5, spread: 3.4, lateral: 1 },
+  hay: { min: 1, max: 3, spread: 5, lateral: 0.4 },
+  fence: { min: 1, max: 3, spread: 4.6, lateral: 0.15 },
+  windmill: { min: 1, max: 1, spread: 0, lateral: 0 },
+  sunflowerPatch: { min: 2, max: 5, spread: 5, lateral: 0.5 },
+  lavenderRow: { min: 2, max: 5, spread: 5, lateral: 0.5 },
+  reeds: { min: 2, max: 6, spread: 4.2, lateral: 1 },
+};
+
+/**
+ * Lateral offset magnitude for a clump anchor of `kind`, in meters from the
+ * centerline. Flowers reach much further than the rest — the old 6.5 + 40 m
+ * band left everything past the near field bare — with a power bias that keeps
+ * the shoulder dense while the tail carries colour into the mid field.
+ */
+function latBandFor(kind: SceneryKind, r: () => number): number {
+  switch (kind) {
+    case 'fence':
+    case 'hay':
+      return 6.8 + r() * 6;
+    case 'windmill':
+      return 45 + r() * 90;
+    case 'sunflowerPatch':
+    case 'lavenderRow':
+      return 9 + r() * 55;
+    case 'flowers':
+      return 6.5 + Math.pow(r(), 1.4) * 104;
+    case 'grassTuft':
+      return 6.5 + r() * 44;
+    default:
+      return 10.5 + r() * 128;
+  }
+}
+
+/**
+ * Pass-1 placement buffer for `buildScenery`, reused across chunk builds so a
+ * build allocates only the two vertex buffers it hands to three.js.
+ */
+interface PlacementBuf {
+  n: number;
+  kind: SceneryKind[];
+  s: Float64Array;
+  lat: Float64Array;
+  scale: Float64Array;
+  yaw: Float64Array;
+  tint: Float32Array;
+}
+
+function createPlacements(cap: number): PlacementBuf {
+  return {
+    n: 0,
+    kind: [],
+    s: new Float64Array(cap),
+    lat: new Float64Array(cap),
+    scale: new Float64Array(cap),
+    yaw: new Float64Array(cap),
+    tint: new Float32Array(cap * 3),
+  };
+}
+
+let placements = createPlacements(256);
+
+/** Grow the placement buffer if this chunk's prop count outruns it. */
+function ensurePlacements(count: number): void {
+  if (count > placements.s.length) placements = createPlacements(count * 2);
+}
 
 /**
  * pickTint holds its sample across the `r()` draws below, so it owns one

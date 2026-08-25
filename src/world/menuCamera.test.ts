@@ -394,70 +394,237 @@ describe('floating-origin rebase', () => {
   });
 });
 
+/**
+ * Where the rear-boundary sweep below starts its runs. Spread over the road so
+ * no single stretch of curvature decides the result.
+ */
+const START_POSITIONS = [4200, 15000, 40000];
+
 describe('the ribbon\u2019s rear boundary', () => {
   /**
    * The menu is the only rig that looks back down the road, so it is the only
    * one that can see where the world stops. `MENU_BEHIND` is what buys the
-   * distance and `MENU_SAFE_DISTANCE` is what the fog needs; neither number
+   * tail and `MENU_SAFE_DISTANCE` is how much tail is needed; neither number
    * means anything without the other, so they are checked as a pair.
    */
-  it('is far enough back that no eye riding with the car can reach it', () => {
+  it('reaches as far back down the road as the cut needs to be hidden', () => {
     expect(MENU_BEHIND * CHUNK_LEN).toBeGreaterThanOrEqual(MENU_SAFE_DISTANCE);
   });
 
   /**
-   * Sweep every shot and report the closest point of the ribbon's rear cut
-   * that lands inside the frustum, for a ribbon retaining `behind` chunks.
-   * `Infinity` means the cut never came into shot at all.
+   * World point back to road-frame `(s, lat)`, searched over the live window.
+   * `RoadPath` maps one way only, so this walks it; the step matches the
+   * terrain grid's own row spacing.
    */
-  function nearestCutInShot(behind: number): { seen: number; nearest: number } {
+  function lateralOf(
+    path: RoadPath,
+    p: THREE.Vector3,
+    from = 0,
+    to = 0,
+  ): { s: number; lat: number } | null {
+    const pose = { pos: new THREE.Vector3(), heading: 0 };
+    let best: { s: number; lat: number } | null = null;
+    let bestAlong = Infinity;
+    for (let s2 = from; s2 <= to; s2 += 6) {
+      path.pose(s2, pose);
+      const dx = p.x - pose.pos.x;
+      const dz = p.z - pose.pos.z;
+      const along = Math.abs(dx * Math.sin(pose.heading) + dz * Math.cos(pose.heading));
+      if (along >= bestAlong) continue;
+      const lat = dx * -Math.cos(pose.heading) + dz * Math.sin(pose.heading);
+      if (Math.abs(lat) > Math.abs(TER_COLS[0])) continue;
+      bestAlong = along;
+      best = { s: s2, lat };
+    }
+    return bestAlong < 6 ? best : null;
+  }
+
+  /**
+   * Occlusion-test one framed sample in every `SAMPLE_STRIDE`. The march is the
+   * expensive half of the sweep; the stride is a fixed count of framed samples,
+   * so which ones get marched is deterministic and evenly spread over the run.
+   * It subsamples the *test*, never the counting — `framed` stays exact.
+   */
+  const SAMPLE_STRIDE = 5;
+
+  /**
+   * How far the nearest *unoccluded* point of the rear cut has to sit from the
+   * eye, in metres, for the menu tail to count as hiding it. See the test that
+   * asserts it for where the number comes from and what it does not claim.
+   */
+  const CUT_MIN_DISTANCE = 650;
+
+  interface CutExposure {
+    /** Samples of the cut row that landed inside a shot's frustum. */
+    framed: number;
+    /** Of those, the ones actually marched against the terrain. */
+    tested: number;
+    /** Of those, the ones with no crest in the way. */
+    seen: number;
+    /** Distance to the nearest *unoccluded* sample; `Infinity` for none. */
+    nearest: number;
+  }
+
+  /**
+   * Sweep every shot from every start position and measure how exposed the
+   * ribbon's rear cut is for a ribbon retaining `behind` chunks.
+   *
+   * The predecessor of this function kept one running minimum distance across
+   * every start position and shot, and skipped the occlusion march for any
+   * sample that could not beat it. `seen` was therefore a count of
+   * record-minimum improvements — a quantity that grows roughly
+   * logarithmically however much is actually visible — so `seen / framed` was
+   * driven almost entirely by its denominator. The rates it reported (1.9e-5 at
+   * twenty-two chunks) measured nothing, and the test built on them passed at
+   * sixteen. Every framed sample is now counted unconditionally, `nearest` is
+   * taken only from unoccluded samples, and the distance-ordering heuristic is
+   * gone.
+   */
+  function measureCutExposure(behind: number): CutExposure {
     const path = new RoadPath(20260824);
     const frustum = new THREE.Frustum();
     const m = new THREE.Matrix4();
     const edge = new THREE.Vector3();
+    let framed = 0;
+    let tested = 0;
     let seen = 0;
     let nearest = Infinity;
-    for (let i = 0; i < MENU_SHOTS.length; i++) {
-      const c = camera();
-      const car = new FakeCar(path, 4200, 2.1, 30);
-      const cam = new MenuCamera(c, path, pickShot(i));
-      for (let f = 0; f < 300; f++) {
-        car.advance(1 / 60);
-        cam.update(car, 1 / 60);
-        if (cam.shotId !== MENU_SHOTS[i].id) break;
-        c.updateMatrixWorld(true);
-        m.multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse);
-        frustum.setFromProjectionMatrix(m);
-        // Where ChunkManager.update would have cut the ribbon this frame.
-        const sCut = (Math.floor(car.s / CHUNK_LEN) - behind) * CHUNK_LEN;
-        for (let lat = TER_COLS[0]; lat <= TER_COLS[TER_COLS.length - 1]; lat += 15) {
-          path.point(sCut, lat, edge);
-          edge.y = terrainMeshHeight(path, sCut, lat);
-          if (!frustum.containsPoint(edge)) continue;
-          seen++;
-          nearest = Math.min(nearest, c.position.distanceTo(edge));
+    // Several start positions, not one. Whether the cut is framed at all swings
+    // wildly with where on the road the sweep begins — at 4200 a ten-chunk tail
+    // frames it zero times, while the live game at the same tail had the cut in
+    // view in every framed sample. A single position is how the previous version
+    // of this test passed vacuously.
+    for (const startS of START_POSITIONS) {
+      for (let i = 0; i < MENU_SHOTS.length; i++) {
+        const c = camera();
+        const car = new FakeCar(path, startS, 2.1, 30);
+        const cam = new MenuCamera(c, path, pickShot(i));
+        for (let f = 0; f < 300; f++) {
+          car.advance(1 / 60);
+          cam.update(car, 1 / 60);
+          if (cam.shotId !== MENU_SHOTS[i].id) break;
+          c.updateMatrixWorld(true);
+          m.multiplyMatrices(c.projectionMatrix, c.matrixWorldInverse);
+          frustum.setFromProjectionMatrix(m);
+          // Where ChunkManager.update would have cut the ribbon this frame.
+          const sCut = (Math.floor(car.s / CHUNK_LEN) - behind) * CHUNK_LEN;
+          for (let lat = TER_COLS[0]; lat <= TER_COLS[TER_COLS.length - 1]; lat += 15) {
+            path.point(sCut, lat, edge);
+            edge.y = terrainMeshHeight(path, sCut, lat);
+            if (!frustum.containsPoint(edge)) continue;
+            framed++;
+            if (framed % SAMPLE_STRIDE !== 0) continue;
+            tested++;
+            if (occlude(path, c.position, edge, sCut, car.s)) continue;
+            seen++;
+            nearest = Math.min(nearest, c.position.distanceTo(edge));
+          }
         }
       }
     }
-    return { seen, nearest };
+    return { framed, tested, seen, nearest };
+  }
+
+  /** The sweep is seeded and deterministic, so each tail is measured once. */
+  const exposures = new Map<number, CutExposure>();
+  function cutExposure(behind: number): CutExposure {
+    let e = exposures.get(behind);
+    if (!e) exposures.set(behind, (e = measureCutExposure(behind)));
+    return e;
   }
 
   /**
-   * The defect this pair of numbers exists for. At the driving tail the shots
-   * that stand ahead of the car frame the cut from ~200 m, where `FogExp2`
-   * still leaves most of its contrast and it reads as a stepped cliff. Kept as
-   * a test rather than a comment so the sweep above is known to be able to see
-   * a boundary at all — a silent zero would make the next case vacuous.
+   * Is `p` hidden from `eye` by the terrain between them?
+   *
+   * Marches the sight line against the height field. This is what the frustum
+   * on its own cannot answer, and the difference is not a detail: `RoadPath`
+   * doubles back on itself often enough that the rear cut is *framed* at almost
+   * every tail length, at distances that wander between 244 and 558 m with no
+   * relation to how long the tail is. Whether it can actually be seen is a
+   * question about the crests in between.
+   *
+   * Steps of 12 m: fine enough to catch a crest, coarse enough that the sweep
+   * stays inside the suite's time budget. This is a loose *upper* bound on
+   * exposure, in several directions at once: it samples the height field rather
+   * than the drawn mesh (which can miss a crest by ~2 m, §5.3), it knows
+   * nothing of scenery or the far-land backdrop, and a march point that
+   * projects outside the ribbon counts as clear. Erring toward "visible" is the
+   * safe direction for a test asserting that the cut is kept at a distance, but
+   * it does mean the counts below are not an exposure figure to quote.
    */
-  it('was in shot, and close, at the driving tail', () => {
-    const { seen, nearest } = nearestCutInShot(PLAY_BEHIND);
+  function occlude(
+    path: RoadPath,
+    eye: THREE.Vector3,
+    p: THREE.Vector3,
+    sCut: number,
+    carS: number,
+  ): boolean {
+    const march = new THREE.Vector3();
+    const total = eye.distanceTo(p);
+    for (let d = 24; d < total - 12; d += 12) {
+      march.lerpVectors(eye, p, d / total);
+      const hit = lateralOf(path, march, sCut, carS + 200);
+      if (hit && terrainMeshHeight(path, hit.s, hit.lat) > march.y + 0.5) return true;
+    }
+    return false;
+  }
+
+  /**
+   * The defect this pair of numbers exists for, and the control for the case
+   * below. At the driving tail the cut is not merely framed but genuinely in
+   * view — 88% of what it marches is unoccluded — close, with props
+   * standing on its lip. Kept as a test rather than a comment so the sweep is
+   * known to be able to see a boundary at all, and so the bar the next case
+   * sets is known to be a bar some tail fails. A silent zero here would make
+   * that case vacuous, which is how the first version of this pair passed while
+   * the shipped tail left the cut on screen.
+   */
+  it('was in view, and close, at the driving tail', () => {
+    const { tested, seen, nearest } = cutExposure(PLAY_BEHIND);
     expect(seen).toBeGreaterThan(0);
-    expect(nearest).toBeLessThan(MENU_SAFE_DISTANCE);
+    expect(seen / tested).toBeGreaterThan(0.5);
+    expect(nearest).toBeLessThan(400);
+    expect(nearest).toBeLessThan(CUT_MIN_DISTANCE);
   });
 
-  /** And with the menu's tail, nothing the fog cannot finish. */
-  it('is never in shot nearer than the fog can hide it', () => {
-    expect(nearestCutInShot(MENU_BEHIND).nearest).toBeGreaterThanOrEqual(MENU_SAFE_DISTANCE);
+  /**
+   * And with the menu's tail, whatever is still exposed is far away.
+   *
+   * A floor on the nearest *unoccluded* cut — the one quantity in this sweep
+   * that moves with the tail and that the haze argument in `MENU_BEHIND`'s
+   * docblock actually rests on. Measured over the full sweep (`SAMPLE_STRIDE`
+   * of 1; at the shipped stride of 5 every `nearest` below reproduces to within
+   * two metres and every rate to within about a percent):
+   *
+   * | `MENU_BEHIND` | tail | framed | seen | rate | nearest visible |
+   * |---|---|---|---|---|---|
+   * | 3 (`PLAY_BEHIND`) | 180 m | 41312 | 35959 | 8.7e-1 | 169 m |
+   * | 10 (was) | 600 m | 10458 | 9090 | 8.7e-1 | 460 m |
+   * | 14 | 840 m | 15961 | 5885 | 3.7e-1 | 705 m |
+   * | 16 | 960 m | 23430 | 4803 | 2.0e-1 | 737 m |
+   * | 18 | 1080 m | 32829 | 8565 | 2.6e-1 | 765 m |
+   * | 22 (now) | 1320 m | 51943 | 6378 | 1.2e-1 | 688 m |
+   * | 26 | 1560 m | 52709 | 0 | 0 | — |
+   *
+   * Read that honestly. The distance separates 3 and 10 cleanly from everything
+   * at 14 and above and nothing else: it is not monotonic, and 22 sits *nearer*
+   * than 14, 16 and 18. The rate does not separate them either. By this
+   * instrument — which over-reports besides, see `occlude` — every tail from 14
+   * up is equivalent, and 650 m is the widest bar the data supports: below the
+   * closest of them with a little margin, far above the 460 m of the tail that
+   * shipped the defect. It is deliberately *not* reverse-engineered to make 22
+   * the unique pass. Constructing a threshold that way is how the first version
+   * of this test went wrong, and arithmetic alone would not have made it right.
+   * What picks 22 out of 14..22 is the design argument in `MENU_BEHIND`'s
+   * docblock, not this sweep.
+   */
+  it('keeps the cut at least CUT_MIN_DISTANCE away at the menu tail', () => {
+    const { framed, nearest } = cutExposure(MENU_BEHIND);
+    // The sweep has to have had the chance: a tail nothing frames would make
+    // the distance below vacuous — that is how the first version of this pair
+    // passed while the shipped tail left the cut on screen.
+    expect(framed).toBeGreaterThan(1000);
+    expect(nearest).toBeGreaterThanOrEqual(CUT_MIN_DISTANCE);
   });
 
   /**

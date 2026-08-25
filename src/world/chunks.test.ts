@@ -9,8 +9,10 @@ import {
   SLOPE_FOLLOW,
   TER_COLS,
   TER_ROW_STEP,
+  TERRAIN_ROW_STRIDE,
   createTerrainSample,
   groundProp,
+  terrainRow,
   propOrientation,
   sampleTerrainMesh,
   terrainHeight,
@@ -335,20 +337,30 @@ describe('groundProp', () => {
 
 describe('ChunkManager world layout', () => {
   /**
-   * Captured from the generator before scenery was regrounded. Placement is
-   * seeded from the chunk index, so any change to the order the seeded stream
-   * is consumed reshuffles every existing stretch of world.
+   * Captured from the generator. Placement is seeded from the chunk index, so
+   * any change to the order the seeded stream is consumed reshuffles every
+   * existing stretch of world — the clumping pass in `buildScenery` did, which
+   * is why these were re-taken. Obstacles now arrive in runs because near-road
+   * rocks and fences are placed in clumps rather than one at a time.
    */
   const GOLDEN_OBSTACLES: Record<number, [string, number, number, number][]> = {
-    0: [['0:33', 54.861556, -7.449082, 2.627759]],
-    1: [['1:5', 111.552899, -9.019832, 2.76586]],
-    2: [['2:28', 165.422818, 8.539785, 2.862099]],
-    3: [['3:19', 236.139531, 7.713337, 2.453197]],
+    0: [
+      ['0:44', 32.543384, -8.403857, 2.707512],
+      ['0:45', 32.123695, -7.876293, 2.111137],
+      ['0:55', 12.93698, 9.441718, 1.742635],
+      ['0:56', 10.395281, 9.446043, 2.442634],
+    ],
+    1: [],
+    2: [
+      ['2:54', 168.864785, 9.276291, 1.962876],
+      ['2:55', 171.25262, 9.899184, 2.67398],
+    ],
+    3: [],
     4: [],
     5: [],
     6: [],
   };
-  const GOLDEN_VERTS = [17976, 20040, 20868, 25236, 25848, 26616, 28572];
+  const GOLDEN_VERTS = [32244, 33192, 23772, 26736, 29376, 29820, 32136];
 
   function build(): ChunkManager {
     const cm = new ChunkManager(new RoadPath(1337), new THREE.Scene());
@@ -646,5 +658,92 @@ describe('terrain ribbon folding', () => {
         expect(path.effectiveLateral(s, lat)).toBe(lat);
       }
     }
+  });
+});
+
+describe('terrainRow', () => {
+  /**
+   * `buildTerrain` and `world/grass.ts` both lay their work out on this one
+   * row function, which is what stops the ground cover from drifting off the
+   * triangles the renderer draws (docs/ARCHITECTURE.md §5.3).
+   */
+  it('is exactly the terrain mesh vertex row it is drawn from', () => {
+    const path = new RoadPath(20260824);
+    const cm = new ChunkManager(path, new THREE.Scene());
+    cm.update(600);
+    const index = 10;
+    const group = cm.root.children[index - (600 / CHUNK_LEN - PLAY_BEHIND)] as THREE.Group;
+    // Road and terrain are both indexed grids; the terrain is the one with a
+    // TER_COLS-wide row.
+    const wanted = (CHUNK_LEN / TER_ROW_STEP + 1) * TER_COLS.length;
+    const terrain = group.children.find(
+      (c) => (c as THREE.Mesh).geometry?.attributes.position.count === wanted,
+    ) as THREE.Mesh;
+    const pos = terrain.geometry.attributes.position;
+    const cols = TER_COLS.length;
+    const row = new Float64Array(cols * TERRAIN_ROW_STRIDE);
+    for (let r = 0; r * TER_ROW_STEP <= CHUNK_LEN; r++) {
+      terrainRow(path, index * CHUNK_LEN + r * TER_ROW_STEP, row);
+      for (let j = 0; j < cols; j++) {
+        const v = r * cols + j;
+        expect(pos.getX(v) + group.position.x).toBeCloseTo(row[j * TERRAIN_ROW_STRIDE], 3);
+        expect(pos.getY(v)).toBeCloseTo(row[j * TERRAIN_ROW_STRIDE + 1], 3);
+        expect(pos.getZ(v) + group.position.z).toBeCloseTo(row[j * TERRAIN_ROW_STRIDE + 2], 3);
+      }
+    }
+  });
+
+  it('reports the effective lateral each column landed at', () => {
+    const path = new RoadPath(20260824);
+    const row = new Float64Array(TER_COLS.length * TERRAIN_ROW_STRIDE);
+    terrainRow(path, 100, row);
+    for (let j = 0; j < TER_COLS.length; j++) {
+      const eff = row[j * TERRAIN_ROW_STRIDE + 3];
+      // Never further out than the nominal column, never across the road, and
+      // always the value RoadPath.point would have used.
+      expect(Math.abs(eff)).toBeLessThanOrEqual(Math.abs(TER_COLS[j]) + 1e-9);
+      expect(Math.sign(eff)).toBe(Math.sign(TER_COLS[j]));
+      expect(eff).toBe(path.effectiveLateral(100, TER_COLS[j]));
+    }
+  });
+});
+
+describe('scenery clumping', () => {
+  function obstaclesOfChunk(cm: ChunkManager, index: number) {
+    return [...cm.obstaclesNear(index * CHUNK_LEN + CHUNK_LEN / 2, CHUNK_LEN / 2)].filter(
+      (o) => Math.floor(o.s / CHUNK_LEN) === index,
+    );
+  }
+
+  it('keeps every clump member inside its own chunk', () => {
+    // Clump anchors are inset by the run's own reach precisely so no member
+    // crosses a seam — a prop that did would be missing or doubled there.
+    const cm = new ChunkManager(new RoadPath(20260824), new THREE.Scene());
+    cm.update(0);
+    let seen = 0;
+    for (let index = 0; index < 20; index++) {
+      for (const ob of cm.obstaclesNear(index * CHUNK_LEN + 30, 40)) {
+        const owner = Number(ob.key.split(':')[0]);
+        expect(ob.s).toBeGreaterThanOrEqual(owner * CHUNK_LEN);
+        expect(ob.s).toBeLessThanOrEqual((owner + 1) * CHUNK_LEN);
+        seen++;
+      }
+    }
+    expect(seen).toBeGreaterThan(10);
+  });
+
+  it('emits props in runs rather than one at a time', () => {
+    // Uniform scatter over 60 m almost never puts two near-road obstacles
+    // within a few metres of each other; clumping does it routinely.
+    const cm = new ChunkManager(new RoadPath(20260824), new THREE.Scene());
+    cm.update(0);
+    let pairs = 0;
+    for (let index = 0; index < 22; index++) {
+      const obs = obstaclesOfChunk(cm, index).sort((a, b) => a.s - b.s);
+      for (let i = 1; i < obs.length; i++) {
+        if (Math.abs(obs[i].s - obs[i - 1].s) < 10) pairs++;
+      }
+    }
+    expect(pairs).toBeGreaterThan(3);
   });
 });

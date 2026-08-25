@@ -171,17 +171,35 @@ function sightBlocked(
 export const MENU_MAX_LEAD = 260;
 
 /**
- * How far from the eye the ribbon's rear boundary has to be before the menu
- * may show it, metres.
- *
- * `FogExp2` extinguishes contrast as `exp(-(d * density)^2)`, and the thinnest
- * density the biomes ask for is `0.0038 * 0.9`. At 600 m that leaves under 2%
- * of the boundary's own contrast against the far-land backdrop behind it,
- * which is below what the cut's stepped silhouette needs to read as an edge.
- * `chunks.MENU_BEHIND` is sized to clear this from every shot; the test suite
+ * How far **back along the road** the ribbon has to reach before the menu may
+ * show it, metres. `chunks.MENU_BEHIND` is sized to clear this; the test suite
  * checks the pair rather than trusting the comment.
+ *
+ * Note what this is not. It is not a distance from the eye, and the two are
+ * not interchangeable: `RoadPath` winds hard enough to double back on itself,
+ * so a cut 600 m back along the arc is routinely 250-350 m away in a straight
+ * line, and pushing the tail further can bring the cut *nearer* rather than
+ * further as the road loops around. Sizing this against a euclidean distance
+ * looks reasonable and measures nothing.
+ *
+ * What actually hides the cut is the land in between. Sampling the live attract
+ * mode — the cut row raycast against the chunk meshes every frame, so a sample
+ * counts only when it is genuinely unoccluded rather than merely inside the
+ * frustum — the cut is directly visible in 19% of framed samples at 600 m of
+ * tail and in **none** at 1320 m. Those two rows are single runs of very
+ * unequal length, so read the shape and not the last decimal (§5.3); the
+ * offline sweep in `menuCamera.test.ts` cannot separate 1320 m from 840 m at
+ * all. What both agree on is that a rolling height field over a winding road
+ * nearly always has a crest in the way at this range, and that the terrain, not
+ * the haze, is the mechanism — at the distances where anything is still exposed
+ * the haze has barely started (see `chunks.MENU_BEHIND`).
+ *
+ * 1320 m is `AHEAD * CHUNK_LEN`, and that is not a coincidence worth losing:
+ * the ribbon's forward cut is hidden at exactly the same distance, by the same
+ * haze, met by the same `FAR_LAND_HAZE_SCALE` backdrop. One number covers both
+ * ends of the world.
  */
-export const MENU_SAFE_DISTANCE = 600;
+export const MENU_SAFE_DISTANCE = 1320;
 
 /**
  * The shot list. Durations sit inside 7–11 s so the menu keeps cutting without

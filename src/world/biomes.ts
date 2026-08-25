@@ -47,7 +47,17 @@ export interface BiomeVisual {
   mist: number;
   /** Relative scenery weights. */
   mix: Partial<Record<SceneryKind, number>>;
-  /** Scenery items per chunk (60 m). */
+  /**
+   * Merged-bake scenery items per chunk (60 m), before the per-chunk +/-15%
+   * jitter. These are *clump members*, not clump anchors — `buildScenery`
+   * emits them in seeded runs, so the count buys groves and drifts rather than
+   * an even sprinkle (docs/ARCHITECTURE.md §5.7).
+   *
+   * Dense ground cover is not counted here: `world/grass.ts` runs its own
+   * instanced field at a couple of thousand clusters a chunk, which is why
+   * `grassTuft` weights are low — it is the occasional larger tussock now, not
+   * the ground itself.
+   */
   density: number;
 }
 
@@ -61,8 +71,8 @@ export const BIOMES: Record<BiomeId, BiomeVisual> = {
     skyTint: '#bfe3ff',
     fogTint: '#d2ecd2',
     mist: 1.0,
-    mix: { oak: 4, poplar: 1, rock: 1.5, flowers: 5, grassTuft: 6, fence: 0.8 },
-    density: 42,
+    mix: { oak: 6, poplar: 2, rock: 1.2, flowers: 9, grassTuft: 3, fence: 0.6 },
+    density: 78,
   },
   farmland: {
     id: 'farmland',
@@ -73,8 +83,24 @@ export const BIOMES: Record<BiomeId, BiomeVisual> = {
     skyTint: '#ffe9c4',
     fogTint: '#efe0b8',
     mist: 0.9,
-    mix: { oak: 1.5, poplar: 2, hay: 4, fence: 3, windmill: 0.5, grassTuft: 4, rock: 0.7 },
-    density: 38,
+    mix: {
+      oak: 2.5,
+      poplar: 3.5,
+      hay: 4,
+      fence: 3,
+      // Raised from 0.5 when clumping landed. A weight now buys a clump
+      // *anchor*, and the props it emits are `weight x E[clumpSize]` — so a
+      // windmill (clump 1-1) lost ground to every neighbour that clumps as
+      // `density` rose 38 -> 68, falling from ~1.21 per chunk to ~0.68. The
+      // windmill is farmland's signature (§5.4); it should not get rarer in a
+      // change whose whole purpose was a fuller world. Solves
+      // `68w / (49.2 + w) = 1.21` for the pre-clumping frequency.
+      windmill: 0.9,
+      grassTuft: 2,
+      rock: 0.6,
+      flowers: 2.5,
+    },
+    density: 68,
   },
   sunflower: {
     id: 'sunflower',
@@ -85,8 +111,8 @@ export const BIOMES: Record<BiomeId, BiomeVisual> = {
     skyTint: '#c9edf0',
     fogTint: '#e4f0c8',
     mist: 0.9,
-    mix: { sunflowerPatch: 7, oak: 1.5, poplar: 1.5, fence: 1.2, grassTuft: 3, flowers: 2 },
-    density: 46,
+    mix: { sunflowerPatch: 7, oak: 2.5, poplar: 2.5, fence: 1, grassTuft: 1.5, flowers: 4 },
+    density: 84,
   },
   autumn: {
     id: 'autumn',
@@ -97,8 +123,8 @@ export const BIOMES: Record<BiomeId, BiomeVisual> = {
     skyTint: '#ffd9a8',
     fogTint: '#f2c79c',
     mist: 1.15,
-    mix: { maple: 8, oak: 2, rock: 1.5, grassTuft: 3, flowers: 1, fence: 0.5 },
-    density: 52,
+    mix: { maple: 11, oak: 3.5, rock: 1.2, grassTuft: 1.5, flowers: 3, fence: 0.4 },
+    density: 94,
   },
   pine: {
     id: 'pine',
@@ -109,8 +135,8 @@ export const BIOMES: Record<BiomeId, BiomeVisual> = {
     skyTint: '#cfe6ea',
     fogTint: '#c8ded8',
     mist: 1.6,
-    mix: { pine: 9, rock: 3, grassTuft: 3, flowers: 0.8 },
-    density: 48,
+    mix: { pine: 12, poplar: 0.8, rock: 2.5, grassTuft: 1.5, flowers: 2.5 },
+    density: 88,
   },
   lavender: {
     id: 'lavender',
@@ -121,8 +147,16 @@ export const BIOMES: Record<BiomeId, BiomeVisual> = {
     skyTint: '#e6d9f5',
     fogTint: '#ded0ec',
     mist: 1.1,
-    mix: { lavenderRow: 8, oak: 1.2, poplar: 1, rock: 1, grassTuft: 2, fence: 1 },
-    density: 44,
+    mix: {
+      lavenderRow: 8,
+      oak: 2,
+      poplar: 1.8,
+      rock: 0.8,
+      grassTuft: 1.2,
+      fence: 0.8,
+      flowers: 2.5,
+    },
+    density: 80,
   },
   cherry: {
     id: 'cherry',
@@ -133,8 +167,8 @@ export const BIOMES: Record<BiomeId, BiomeVisual> = {
     skyTint: '#ffe3ee',
     fogTint: '#f5d8e4',
     mist: 1.1,
-    mix: { cherryTree: 8, rock: 1.2, flowers: 4, grassTuft: 3 },
-    density: 46,
+    mix: { cherryTree: 11, oak: 1, rock: 1, flowers: 6, grassTuft: 1.5 },
+    density: 84,
   },
   wetland: {
     id: 'wetland',
@@ -145,8 +179,8 @@ export const BIOMES: Record<BiomeId, BiomeVisual> = {
     skyTint: '#d9e8f0',
     fogTint: '#d5e4e6',
     mist: 1.9,
-    mix: { reeds: 8, poplar: 1.5, rock: 1.5, grassTuft: 3, flowers: 1.5 },
-    density: 42,
+    mix: { reeds: 8, poplar: 2.5, oak: 1, rock: 1.2, grassTuft: 1.5, flowers: 3 },
+    density: 76,
   },
 };
 

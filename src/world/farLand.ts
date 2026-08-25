@@ -48,11 +48,26 @@ import { noise2, toonRamp } from './materials';
  *   the work. That is not uniform across it, and the difference matters: the
  *   ridge, out past 2 km, is fogged to saturation and is pure fog colour, but
  *   the part that actually plugs a horizon-grazing sight line is much nearer —
- *   a ray at -0.5° to 1° meets the fan at 320-400 m, only ~77-90% fogged
- *   radially, and three.js fogs on view-space depth, so at the frame edge it
- *   is nearer ~55-60%. Its own colour therefore shows through there, which is
- *   correct — that band should read as terrain continuing, not as haze. The
- *   biome blend in `update` is doing real work; it is not insurance.
+ *   a ray at -0.5° to 1° meets the fan at 320-400 m. Its own colour has to
+ *   show through *somewhere*, which is correct: that band should read as
+ *   terrain continuing, not as haze. The biome blend in `update` is doing real
+ *   work; it is not insurance.
+ *
+ * That last property used to come free from a thick fog, and no longer does.
+ * The fan is a compressed stand-in: 4 km of geometry carrying tens of km of
+ * implied land, so its *geometric* radius is nowhere near the distance it
+ * depicts. At the old 0.0038 that did not show, because everything past 400 m
+ * was saturated either way. At 0.0014 it shows badly — the ribbon's own far
+ * edge, 1320 m out, is 96% hazed while the fan pixel directly above it is only
+ * 340 m away and 19% hazed, so the backdrop stops being haze and becomes a
+ * vivid cone with a hard silhouette sitting on a pale strip of terrain.
+ *
+ * `FAR_LAND_HAZE_SCALE` is the fix: the fan fogs on a *scaled* depth, so it
+ * carries the aerial perspective of the distance it represents rather than the
+ * distance it occupies. Scaling the depth rather than baking a colour keeps
+ * the biome `mist` multiplier, the weather `fogMultiplier` and `nightness`
+ * working on the backdrop exactly as they work on the ribbon — a fan whose
+ * haze was painted in would go flat the moment a fog bank rolled through.
  */
 
 /**
@@ -130,6 +145,54 @@ export const FAR_LAND_RIDGE_NOISE_DEG = 1.4;
  */
 export const FAR_LAND_NOISE_SCALE = 24;
 
+/**
+ * How much further away the fan fogs than it geometrically is, at full ramp.
+ *
+ * The fan depicts the land past the ribbon, and the ribbon stops at
+ * `AHEAD * CHUNK_LEN` = 1320 m. A sight line grazing the horizon from a camera
+ * ~5 m over the road leaves the ribbon there and meets the fan somewhere in
+ * [-1.1 deg, +0.7 deg] of elevation — the spread is 1320 m of road elevation
+ * tilting the join — which is fan radii 295 m to 383 m. The binding end is the
+ * near one: `1320 / 294.9 = 4.477`, rounded up.
+ *
+ * Round *up*, because the two directions are not symmetric. A fan hazier than
+ * the terrain it stands behind is just more distance; a fan **crisper** than
+ * that terrain is a vivid band sitting on a pale strip of ground, which is the
+ * failure this constant exists to prevent — measured at scale 1 it is a solid
+ * green cone with a hard silhouette, and at 2 it is still a green wall. Note
+ * that the density cancels out of `r * S >= AHEAD * CHUNK_LEN`, so the
+ * guarantee holds in every biome, at every hour and in every weather rather
+ * than at one tuned density.
+ *
+ * The far end of the join band lands at 1.31x the cut, which is the price of
+ * covering the near end. Past 5 or so there is nothing left to buy: 4.5 and 7
+ * are indistinguishable on screen because the whole band is already saturated.
+ *
+ * Raising this does not buy a nearer join — it buys a *further* one. The join
+ * distance is `AHEAD * CHUNK_LEN`, so this and `AHEAD` move together or not at
+ * all.
+ */
+export const FAR_LAND_HAZE_SCALE = 4.5;
+
+/**
+ * Ring parameter at which the haze scale reaches full.
+ *
+ * It ramps from 1 rather than starting there, because the fan's inner rings
+ * are not depicting distance — they are the buried rim, sitting a few tens of
+ * metres from the eye under real terrain. Where the ribbon narrows on the
+ * inside of a tight bend and the rim shows through (§5.3), a rim already at
+ * full scale would be a saturated smudge against ground 75 m away.
+ *
+ * 0.25 is the ceiling, not a preference: the lowest ring a horizon-grazing ray
+ * can reach is t = 0.2564, and `FAR_LAND_HAZE_SCALE`'s guarantee is derived at
+ * *full* scale, so the ramp has to be finished before that ring. It is also a
+ * floor's width above the rays that are buried on a straight (everything below
+ * -1.7 deg, t = 0.235), so almost the whole ramp lives under real terrain.
+ * Kept smooth (smoothstep, C1 at both ends) so no ring boundary reads as a
+ * band on the horizon.
+ */
+export const FAR_LAND_HAZE_RAMP_T = 0.25;
+
 /** Radial rings. Half of them land in the band that is actually visible. */
 export const FAR_LAND_RINGS = 14;
 
@@ -185,6 +248,23 @@ export function farLandHeight(t: number, az: number): number {
   return farLandRadius(t) * Math.tan(farLandAngle(t, az));
 }
 
+/**
+ * Multiplier on ring `t`'s fog depth — 1 at the buried rim, rising smoothly to
+ * `FAR_LAND_HAZE_SCALE` by `FAR_LAND_HAZE_RAMP_T` and flat past it.
+ *
+ * Monotonic by construction, which matters: a non-monotonic haze would put a
+ * clearer ring beyond a hazier one and read as a hole in the backdrop.
+ */
+export function farLandHazeScale(t: number): number {
+  const x = Math.min(1, Math.max(0, t / FAR_LAND_HAZE_RAMP_T));
+  return 1 + (FAR_LAND_HAZE_SCALE - 1) * x * x * (3 - 2 * x);
+}
+
+/** Implied distance of ring `t`, metres — what its haze depicts. */
+export function farLandHazeDepth(t: number): number {
+  return farLandRadius(t) * farLandHazeScale(t);
+}
+
 /** Build the fan's geometry. Called once; the mesh is never rebuilt. */
 export function buildFarLandGeometry(): THREE.BufferGeometry {
   const rings = FAR_LAND_RINGS;
@@ -193,10 +273,12 @@ export function buildFarLandGeometry(): THREE.BufferGeometry {
   const pos = new Float32Array(count * 3);
   const norm = new Float32Array(count * 3);
   const col = new Float32Array(count * 3);
+  const haze = new Float32Array(count);
 
   for (let i = 0; i < rings; i++) {
     const t = i / (rings - 1);
     const r = farLandRadius(t);
+    const hz = farLandHazeScale(t);
     for (let j = 0; j < segs; j++) {
       const az = (j / segs) * Math.PI * 2;
       const k = (i * segs + j) * 3;
@@ -210,6 +292,7 @@ export function buildFarLandGeometry(): THREE.BufferGeometry {
       col[k] = v;
       col[k + 1] = v;
       col[k + 2] = v;
+      haze[i * segs + j] = hz;
     }
   }
 
@@ -239,6 +322,9 @@ export function buildFarLandGeometry(): THREE.BufferGeometry {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  // Read by the fog-depth injection in FarLand's constructor. Harmless on a
+  // scene with no fog, where the shader never declares it.
+  geo.setAttribute('aHaze', new THREE.BufferAttribute(haze, 1));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
   return geo;
 }
@@ -265,6 +351,21 @@ export class FarLand {
       // so every real mesh paints over it and there is no seam to z-fight.
       depthWrite: false,
     });
+    // Aerial perspective: fog the fan on the distance it *depicts* rather than
+    // the distance it occupies (see `FAR_LAND_HAZE_SCALE`). three writes
+    // `vFogDepth = -mvPosition.z` in <fog_vertex>, so scaling it right after is
+    // the whole change; the fragment side is stock. Guarded on USE_FOG, which
+    // three only defines when the scene has fog and the material accepts it —
+    // without the guard a fog-less scene would reference an undeclared varying
+    // and fail to link.
+    this.mat.onBeforeCompile = (shader) => {
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nattribute float aHaze;')
+        .replace(
+          '#include <fog_vertex>',
+          '#include <fog_vertex>\n#ifdef USE_FOG\n\tvFogDepth *= aHaze;\n#endif',
+        );
+    };
     this.mesh = new THREE.Mesh(buildFarLandGeometry(), this.mat);
     this.mesh.name = 'farLand';
     // Centred on the camera and 4 km across, so it always intersects the
