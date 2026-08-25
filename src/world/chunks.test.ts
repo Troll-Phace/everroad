@@ -1,15 +1,18 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as THREE from 'three';
+import { readFileSync } from 'node:fs';
 import { RoadPath } from './roadPath';
 import {
   CHUNK_LEN,
   ChunkManager,
+  GRASS_BEHIND,
   MENU_BEHIND,
   PLAY_BEHIND,
   SLOPE_FOLLOW,
   TER_COLS,
   TER_ROW_STEP,
   TERRAIN_ROW_STRIDE,
+  coverBand,
   createTerrainSample,
   groundProp,
   terrainRow,
@@ -17,7 +20,18 @@ import {
   sampleTerrainMesh,
   terrainHeight,
   terrainMeshHeight,
+  type CoverBand,
+  type CoverEye,
 } from './chunks';
+import { GRASS_TIERS, GrassField } from './grass';
+import {
+  MENU_MAX_LEAD,
+  MENU_SHOTS,
+  MenuCamera,
+  type CinematicTarget,
+  type MenuShotId,
+} from './menuCamera';
+import { CARS } from '../game/economy/cars';
 
 /**
  * The tests below rebuild the terrain mesh independently of chunks.ts and
@@ -745,5 +759,401 @@ describe('scenery clumping', () => {
       }
     }
     expect(pairs).toBeGreaterThan(3);
+  });
+});
+
+/**
+ * Ground cover follows whatever is looking at the world, which in attract mode
+ * is not the car (docs/ARCHITECTURE.md §5.7). The harness below is the one
+ * `menuCamera.test.ts` uses for its offline sweeps over the director —
+ * `FakeCar` places itself exactly the way `Vehicle` does, and `pickShot` is a
+ * seeded `rand` stream that lands the director on a chosen take — reproduced
+ * here rather than exported across test files.
+ */
+const QUALITIES = ['low', 'medium', 'high'] as const;
+
+/** A car driving the given path, placed the way `Vehicle` places it. */
+class FakeCar implements CinematicTarget {
+  readonly root = { position: new THREE.Vector3() };
+  yaw = 0;
+  constructor(
+    private path: RoadPath,
+    public s: number,
+    public lateral = 2.1,
+    public speedMps = 24,
+  ) {
+    this.yaw = path.pose(s).heading;
+    path.point(s, lateral, this.root.position);
+  }
+}
+
+/** The rand stream that lands the director on shot `i` with mid-range rolls. */
+function pickShot(i: number): () => number {
+  const values = [i / MENU_SHOTS.length + 1e-9, 0.5, 0.3, 0.7];
+  let n = 0;
+  return () => values[n++ % values.length];
+}
+
+/**
+ * The fastest car attract mode can showcase. `menuCruiseMph` runs the menu at
+ * the drawn car's own `baseSpeed`, and `roadsideStatic` leads the car by
+ * `clamp(speedMps * 5.4, 95, MENU_MAX_LEAD)` — so anything from 108 km/h up
+ * saturates the clamp, which the two fastest cars in the catalog do.
+ */
+const FASTEST_MPS = Math.max(...CARS.map((c) => c.baseSpeed)) * 0.44704;
+
+/** Chunk indices carrying ground cover, as `ChunkManager` stamped them. */
+function grassChunks(cm: ChunkManager): number[] {
+  const out: number[] = [];
+  cm.root.traverse((o) => {
+    if ((o as THREE.InstancedMesh).isInstancedMesh) out.push(o.userData.chunkIndex as number);
+  });
+  return out.sort((a, b) => a - b);
+}
+
+/**
+ * Drive the director to one take and hand back the eye it settled on, wired to
+ * a manager in `main.ts`'s own order: ribbon first, then the camera, then the
+ * cover pass against the vantage the camera actually took. Reversing the last
+ * two is the stale-vantage defect — see the ordering test below.
+ */
+function menuVantage(
+  shot: MenuShotId,
+  quality: (typeof QUALITIES)[number],
+  carS: number,
+  speedMps: number,
+) {
+  const path = new RoadPath(20260824);
+  const field = new GrassField(quality);
+  const cm = new ChunkManager(path, new THREE.Scene(), field);
+  const car = new FakeCar(path, carS, 2.1, speedMps);
+  const cam = new MenuCamera(
+    new THREE.PerspectiveCamera(58, 16 / 9, 0.3, 9000),
+    path,
+    pickShot(MENU_SHOTS.findIndex((m) => m.id === shot)),
+  );
+  cm.setBehind(MENU_BEHIND);
+  cm.update(car.s);
+  cam.update(car, 1 / 60);
+  expect(cam.shotId).toBe(shot);
+  const eye: CoverEye = { s: cam.camS };
+  cm.updateCover(car.s, eye);
+  return { cm, cam, car, eye, ahead: GRASS_TIERS[quality].ahead };
+}
+
+describe('coverBand', () => {
+  const out: CoverBand = { lo: 0, hi: 0 };
+
+  /**
+   * The play path. `main.ts` clears the cover eye in `startGame`, so driving
+   * has to resolve to the band it resolved to before the eye existed — one
+   * chunk of tail and the tier's reach in front, and nothing else.
+   */
+  it('is the driving band exactly when no eye is looking', () => {
+    for (const quality of QUALITIES) {
+      const { ahead } = GRASS_TIERS[quality];
+      for (const carS of [0, 37, 600, 4213.5, 90000]) {
+        const cur = Math.floor(carS / CHUNK_LEN);
+        expect(coverBand(carS, null, ahead, out)).toEqual({
+          lo: cur - GRASS_BEHIND,
+          hi: cur + ahead,
+        });
+      }
+    }
+  });
+
+  /**
+   * A union, so the car's own band survives wherever the eye wanders. The car
+   * is the subject of every take and pickups are collected against it, so its
+   * ground is never traded away for the eye's.
+   */
+  it('never gives up the car band, wherever the eye stands', () => {
+    for (const quality of QUALITIES) {
+      const { ahead } = GRASS_TIERS[quality];
+      const carS = 12_000;
+      const cur = Math.floor(carS / CHUNK_LEN);
+      for (const ds of [-48, -8, 0, 26, 58, MENU_MAX_LEAD]) {
+        const band = coverBand(carS, { s: carS + ds }, ahead, out);
+        expect(band.lo).toBeLessThanOrEqual(cur - GRASS_BEHIND);
+        expect(band.hi).toBeGreaterThanOrEqual(cur + ahead);
+      }
+    }
+  });
+
+  /**
+   * A cinematic eye has no privileged direction, so it carries the tier's
+   * reach on both sides of itself — `craneReveal` aims 42 m behind the car
+   * from a vantage ahead of it, `overtake` opens 48 m back.
+   */
+  it('carries the tier reach on both sides of a detached eye', () => {
+    for (const quality of QUALITIES) {
+      const { ahead } = GRASS_TIERS[quality];
+      for (const ds of [-48, -13.5, 26, 58, MENU_MAX_LEAD]) {
+        const carS = 12_000;
+        const band = coverBand(carS, { s: carS + ds }, ahead, out);
+        const eyeCur = Math.floor((carS + ds) / CHUNK_LEN);
+        expect(band.lo).toBeLessThanOrEqual(eyeCur - ahead);
+        expect(band.hi).toBeGreaterThanOrEqual(eyeCur + ahead);
+      }
+    }
+  });
+
+  /**
+   * One span, not two. From the `roadsideStatic` vantage the road between the
+   * eye and the car is in frame for its whole length, and most of it is nearer
+   * to the lens than the car is, so a band with a hole in the middle would put
+   * the cut back where the defect was.
+   */
+  it('spans the car and the eye without a gap between them', () => {
+    const { ahead } = GRASS_TIERS.high;
+    const carS = 12_000;
+    const band = coverBand(carS, { s: carS + MENU_MAX_LEAD }, ahead, out);
+    expect(band.lo).toBeLessThanOrEqual(Math.floor(carS / CHUNK_LEN));
+    expect(band.hi).toBeGreaterThanOrEqual(Math.floor((carS + MENU_MAX_LEAD) / CHUNK_LEN));
+  });
+});
+
+describe('ground cover under a menu vantage', () => {
+  it('showcases a car fast enough to saturate the roadsideStatic clamp', () => {
+    expect(FASTEST_MPS * 5.4).toBeGreaterThan(MENU_MAX_LEAD);
+  });
+
+  /**
+   * The defect. At the clamp the eye stands 260 m in front of the car, while a
+   * band centred on the car stops 120-180 m ahead at `low` and 180-240 m at
+   * `medium` and `high` — so the long lens looked out over bare ground with a
+   * hard cover edge across the middle distance, and the car it was pointed at
+   * sat in grass. Every tier, because every tier's `ahead` is short of 260 m.
+   */
+  for (const quality of QUALITIES) {
+    it(`covers the ground the eye stands on at ${quality}`, () => {
+      const { cm, cam, car, ahead } = menuVantage('roadsideStatic', quality, 12_000, FASTEST_MPS);
+      expect(cam.camS - car.s).toBeCloseTo(MENU_MAX_LEAD, 6);
+      const eyeChunk = Math.floor(cam.camS / CHUNK_LEN);
+      const carChunk = Math.floor(car.s / CHUNK_LEN);
+      const covered = grassChunks(cm);
+      // The chunk under the eye, the chunk under the car, and everything
+      // between them: all of it is in frame down a 26 degree lens.
+      for (let i = carChunk; i <= eyeChunk; i++) expect(covered).toContain(i);
+      // And the tier's reach past the eye in both directions, because the shot
+      // is free to look either way from there.
+      expect(Math.min(...covered)).toBeLessThanOrEqual(eyeChunk - ahead);
+      expect(Math.max(...covered)).toBeGreaterThanOrEqual(eyeChunk + ahead);
+    });
+  }
+
+  /**
+   * Every take, not just the one that reaches furthest. `craneReveal` rises
+   * ahead of the car and aims 42 m *behind* it; `droneFlyby` and `overtake`
+   * sweep to 44-48 m back. Whichever way a shot faces, the cover edge is at
+   * least the tier's reach away from the eye.
+   */
+  it('keeps every shot the tier reach away from both cover edges', () => {
+    for (const shot of MENU_SHOTS) {
+      const { cm, cam, ahead } = menuVantage(shot.id, 'high', 12_000, FASTEST_MPS);
+      const covered = grassChunks(cm);
+      const eyeChunk = Math.floor(cam.camS / CHUNK_LEN);
+      expect(covered).toContain(eyeChunk);
+      expect(Math.min(...covered)).toBeLessThanOrEqual(eyeChunk - ahead);
+      expect(Math.max(...covered)).toBeGreaterThanOrEqual(eyeChunk + ahead);
+    }
+  });
+
+  /**
+   * The band is still a band. Nineteen extra chunks of terrain is what the
+   * menu tail costs (`MENU_BEHIND`); ground cover must not follow it — the
+   * whole point of §5.7's near band is that it is never the `AHEAD` window.
+   */
+  it('stays a handful of chunks rather than the whole menu ribbon', () => {
+    const { cm } = menuVantage('roadsideStatic', 'high', 12_000, FASTEST_MPS);
+    expect(cm.root.children.length).toBeGreaterThan(40);
+    expect(grassChunks(cm).length).toBeLessThanOrEqual(11);
+  });
+
+  /** Driving builds what driving always built: no cover eye, no extra chunks. */
+  it('hands the extra chunks back when the eye is cleared', () => {
+    const { cm, car } = menuVantage('roadsideStatic', 'high', 12_000, FASTEST_MPS);
+    const menuCount = grassChunks(cm).length;
+    cm.updateCover(car.s, null);
+    expect(grassChunks(cm).length).toBe(GRASS_BEHIND + GRASS_TIERS.high.ahead + 1);
+    expect(menuCount).toBeGreaterThan(GRASS_BEHIND + GRASS_TIERS.high.ahead + 1);
+  });
+});
+
+/**
+ * `ChunkManager.update` and `ChunkManager.updateCover` are two passes on
+ * purpose, and the order between them is the whole point: the ribbon has to be
+ * built before the camera (the menu director samples the terrain the chunks
+ * own to choose and clear its vantage), and cover has to be banded after it
+ * (cover follows wherever the camera ended up).
+ *
+ * These pin that as a fact about the world. What they cannot do is read
+ * `main.ts` and prove the frame loop still calls them that way round — the
+ * source check below is the closest thing, and the live attract-mode run in the
+ * PR is what actually confirms it.
+ */
+describe('the cover pass belongs after the camera', () => {
+  /**
+   * A `rand` stream that walks the director through `ids` in order, one cut
+   * each. The director draws four numbers per cut — shot, duration, side, roll
+   * — and picks its shot out of all eight on the first cut and out of the seven
+   * that are not on screen thereafter, so the first draw is solved for the
+   * target rather than guessed.
+   */
+  function shotScript(ids: MenuShotId[]): () => number {
+    const targets = ids.map((id) => MENU_SHOTS.findIndex((m) => m.id === id));
+    const rest = [0.5, 0.3, 0.7];
+    let current = -1;
+    let cut = 0;
+    let draw = 0;
+    return () => {
+      const phase = draw++ % 4;
+      if (phase !== 0) return rest[phase - 1];
+      const target = targets[Math.min(cut++, targets.length - 1)];
+      const first = current < 0;
+      const pick = first ? target : target > current ? target - 1 : target;
+      current = target;
+      return pick / (first ? MENU_SHOTS.length : MENU_SHOTS.length - 1) + 1e-9;
+    };
+  }
+
+  /**
+   * Run the frames a cut lands on, in one of the two orders, and report
+   * whether the chunk the eye is standing on when the frame is *rendered*
+   * carries ground cover.
+   *
+   * `eye` is a live view of `cam.camS`, exactly as `main.ts` holds it, so
+   * running the cover pass before the director is what makes it read the
+   * outgoing take's vantage — no staleness is simulated here, it falls out of
+   * the order.
+   */
+  function coveredAtRender(coverAfterCamera: boolean): boolean[] {
+    const path = new RoadPath(20260824);
+    const field = new GrassField('high');
+    const cm = new ChunkManager(path, new THREE.Scene(), field);
+    const cam = new MenuCamera(
+      new THREE.PerspectiveCamera(58, 16 / 9, 0.3, 9000),
+      path,
+      shotScript(['lowChase', 'roadsideStatic']),
+    );
+    const car = new FakeCar(path, 12_000, 2.1, FASTEST_MPS);
+    const eye: CoverEye = {
+      get s(): number {
+        return cam.camS;
+      },
+    };
+    cm.setBehind(MENU_BEHIND);
+    // Enter the menu the way `enterMenu` does: ribbon, director, then cover.
+    cm.update(car.s);
+    cam.update(car, 1 / 60);
+    cm.updateCover(car.s, eye);
+    expect(cam.shotId).toBe('lowChase');
+
+    const out: boolean[] = [];
+    for (let f = 0; f < 6; f++) {
+      // The sixth frame runs the take past its duration, so it cuts — to
+      // `roadsideStatic`, which at this speed latches the `MENU_MAX_LEAD` clamp.
+      const dt = f === 5 ? 20 : 1 / 60;
+      car.s += car.speedMps * (1 / 60);
+      cm.update(car.s);
+      if (coverAfterCamera) {
+        cam.update(car, dt);
+        cm.updateCover(car.s, eye);
+      } else {
+        cm.updateCover(car.s, eye);
+        cam.update(car, dt);
+      }
+      out.push(grassChunks(cm).includes(Math.floor(cam.camS / CHUNK_LEN)));
+    }
+    expect(cam.shotId).toBe('roadsideStatic');
+    expect(cam.camS - car.s).toBeCloseTo(MENU_MAX_LEAD, 6);
+    return out;
+  }
+
+  /**
+   * The defect the split exists to close. Resolving the band with the ribbon
+   * costs nothing while the eye is walking — five frames of a dolly move it a
+   * metre — but a cut moves it 260 m between one frame and the next, and that
+   * frame renders a fresh vantage standing on ground with no cover on it.
+   */
+  it('leaves the cut frame uncovered when it runs with the ribbon instead', () => {
+    const seen = coveredAtRender(false);
+    expect(seen.slice(0, 5)).toEqual([true, true, true, true, true]);
+    expect(seen[5]).toBe(false);
+  });
+
+  /** And with the pass where `main.ts` puts it, no frame is ever uncovered. */
+  it('covers every frame, cuts included, when it runs after the camera', () => {
+    expect(coveredAtRender(true)).toEqual([true, true, true, true, true, true]);
+  });
+
+  /**
+   * Deliberately literal: the two passes are only correct in one order and
+   * nothing else in the suite can see the frame loop. If `main.ts` is
+   * restructured this should fail and be re-read, not deleted — the ordering
+   * is the contract, the line numbers are not.
+   */
+  it('is where main.ts actually calls it', () => {
+    const src = readFileSync(new URL('../main.ts', import.meta.url), 'utf8');
+    const ribbon = src.indexOf('chunks.update(vehicle.s);\n  pickups.update(');
+    const camera = src.indexOf('if (menuMode) menuCam.update(vehicle, dt);');
+    const cover = src.indexOf('chunks.updateCover(vehicle.s, menuMode ?');
+    expect(ribbon).toBeGreaterThan(0);
+    expect(camera).toBeGreaterThan(ribbon);
+    expect(cover).toBeGreaterThan(camera);
+  });
+});
+
+describe('the cover pass in play', () => {
+  /** One frame of the loop with the chase camera holding it: no eye at all. */
+  function frame(cm: ChunkManager, carS: number): void {
+    cm.update(carS);
+    cm.updateCover(carS, null);
+  }
+
+  /**
+   * The split must not have made driving do more work. Counted rather than
+   * inferred: a band that rebuilt itself every frame would hold exactly the
+   * same meshes and look identical from the outside (§5.7, §14).
+   */
+  it('builds one cover chunk per chunk boundary and nothing in between', () => {
+    const path = new RoadPath(20260824);
+    const field = new GrassField('high');
+    const cm = new ChunkManager(path, new THREE.Scene(), field);
+    frame(cm, 12_000);
+    const builds = vi.spyOn(field, 'build');
+
+    // Four frames inside one chunk: the band does not move, so nothing builds.
+    for (let f = 1; f <= 4; f++) frame(cm, 12_000 + f);
+    expect(builds).not.toHaveBeenCalled();
+
+    // And exactly one chunk per boundary crossed, over a dozen of them.
+    for (let i = 1; i <= 12; i++) {
+      builds.mockClear();
+      frame(cm, 12_000 + i * CHUNK_LEN);
+      expect(builds).toHaveBeenCalledTimes(1);
+      expect(grassChunks(cm).length).toBe(GRASS_BEHIND + GRASS_TIERS.high.ahead + 1);
+    }
+    builds.mockRestore();
+  });
+
+  /**
+   * And the chunks it lands on are the driving band, exactly — the union
+   * collapses to it when nothing but the chase rig is looking.
+   */
+  it('lands on the driving band at every tier', () => {
+    for (const quality of QUALITIES) {
+      const cm = new ChunkManager(
+        new RoadPath(20260824),
+        new THREE.Scene(),
+        new GrassField(quality),
+      );
+      const carS = 12_000 + 17;
+      frame(cm, carS);
+      const cur = Math.floor(carS / CHUNK_LEN);
+      const expected: number[] = [];
+      for (let i = cur - GRASS_BEHIND; i <= cur + GRASS_TIERS[quality].ahead; i++) expected.push(i);
+      expect(grassChunks(cm)).toEqual(expected);
+    }
   });
 });

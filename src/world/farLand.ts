@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { blendColor, type BiomeVisual } from './biomes';
+import { terrainMeshHeight } from './chunks';
 import { noise2, toonRamp } from './materials';
+import type { RoadPath } from './roadPath';
 
 /**
  * The land beyond the terrain ribbon.
@@ -8,261 +10,480 @@ import { noise2, toonRamp } from './materials';
  * The ribbon (`chunks.ts`, §5.3) is swept along the road curve and stops at
  * `TER_COLS` ±165 m, so a near-horizontal sight line runs out over the fields,
  * leaves the ribbon a metre or two above the surface and finds nothing to hit.
- * Rendering the live scene's own chunk meshes to an off-screen mask at
- * 1280x800 and counting sky pixels that have scene geometry above them in the
- * same column, that is 219 px in 106 thin runs at the sunflower-coast repro —
- * sky sitting between the land silhouette and the canopies just above it, the
- * "floating distant trees" report. With this backdrop the count is 0 there and
- * at every other position measured on unfolded road.
- *
- * That last qualifier is load-bearing. A cell folds exactly when `|lat| >= R`,
- * so wherever the radius of curvature drops under 165 m the outermost
- * `TER_COLS` column exceeds it, `1 - k*lat` goes negative and the far field
- * inverts; under 115 m the next column goes too. At s = 21040 (R 95.9) that
- * throws whole trees into the sky, measured at 12-16° elevation and tens of
- * metres above the ground beneath them, detached from any surface (#39). Sky under
- * *that* is not this bug and no horizon can close it — see §5.3's note on the
- * crumpled far field. Measure with the scenery meshes hidden to see this
- * module's own behaviour separately from it.
+ * Rendering the live scene's own chunk meshes to an off-screen mask and
+ * counting sky pixels that have terrain above them in the same column, that is
+ * 5 to 1620 px at the sunflower-coast repro (s = 6750) with this backdrop
+ * hidden, depending on the vantage, and up to a million at the road's tightest
+ * bends — sky sitting between the land silhouette and the canopies just above
+ * it, the "floating distant trees" report. With the backdrop the count is 0, at
+ * that repro and at all three tight bends, from every one of six vantages
+ * spanning 0.65 m to 27 m of eye height and 26° to 62° of lens.
  *
  * Widening the ribbon cannot fix it: the road's minimum radius of curvature is
  * the analytic 87.7 m (`1 / (0.0042 + 0.0035 + 0.0028 + 0.0009)`, the sum of
  * `RoadPath.curvature`'s four sine amplitudes), so a path-space sweep past
- * ±165 m folds over itself. This backdrop is
- * therefore built in **world space, anchored to the camera** — a radial fan
- * centred on the camera that translates (never rotates) with it, the way
+ * ±165 m folds over itself. This backdrop is therefore built in **world
+ * space**, a radial fan that translates (never rotates) with the camera the way
  * `Sky`'s dome does. Nothing about it follows the road curve, so nothing folds.
  *
- * Three properties make it safe:
+ * ## What it is anchored to, and why that is the whole design
  *
- * - It never writes depth and is drawn before every world mesh, so terrain and
- *   scenery always paint over it and there is no depth to fight at the join.
- *   It is not true that it occludes nothing: it deliberately covers the sky
- *   dome, and it is ordered ahead of the sun and moon precisely so it does
- *   *not* cover those — see `renderOrder` in the constructor.
- * - Its elevation angle rises monotonically with radius (see
- *   `farLandBaseAngle`), so the surface never overlaps itself from the camera
- *   at the centre, and — being continuous — it covers *every* angle between
- *   `FAR_LAND_INNER_ANGLE_DEG` and the ridge without gaps.
- * - It reads as haze rather than as an object because `FogExp2` does most of
- *   the work. That is not uniform across it, and the difference matters: the
- *   ridge, out past 2 km, is fogged to saturation and is pure fog colour, but
- *   the part that actually plugs a horizon-grazing sight line is much nearer —
- *   a ray at -0.5° to 1° meets the fan at 320-400 m. Its own colour has to
- *   show through *somewhere*, which is correct: that band should read as
- *   terrain continuing, not as haze. The biome blend in `update` is doing real
- *   work; it is not insurance.
+ * The fan hangs off the **ground under the camera**, not off the eye, and its
+ * profile is a height field in metres above that ground rather than a set of
+ * elevation angles from the lens. `update` samples `terrainMeshHeight` at the
+ * camera's own road coordinates and puts the mesh there.
  *
- * That last property used to come free from a thick fog, and no longer does.
- * The fan is a compressed stand-in: 4 km of geometry carrying tens of km of
- * implied land, so its *geometric* radius is nowhere near the distance it
- * depicts. At the old 0.0038 that did not show, because everything past 400 m
- * was saturated either way. At 0.0014 it shows badly — the ribbon's own far
- * edge, 1320 m out, is 96% hazed while the fan pixel directly above it is only
- * 340 m away and 19% hazed, so the backdrop stops being haze and becomes a
- * vivid cone with a hard silhouette sitting on a pale strip of terrain.
+ * That is not a refactor of the old eye-anchored version; it is the fix for the
+ * defect this module shipped with. Anchoring the profile to the eye meant the
+ * inner rings sat 15-20 m *below* ground level — a bowl — so the surface had to
+ * climb back out of its own hole before it could show, and it broke the horizon
+ * at a radius that had nothing to do with how far away that piece of land was
+ * meant to be. A horizon-grazing ray met the fan at 295-380 m no matter what
+ * the world beyond the ribbon looked like, which is why the backdrop needed a
+ * fudge factor (`FAR_LAND_HAZE_SCALE`) to fog as though it were four and a half
+ * times further away than it was. Grounded, the geometry is at its true
+ * distance, and the fog is simply the scene's own `FogExp2` doing its job.
  *
- * `FAR_LAND_HAZE_SCALE` is the fix: the fan fogs on a *scaled* depth, so it
- * carries the aerial perspective of the distance it represents rather than the
- * distance it occupies. Scaling the depth rather than baking a colour keeps
- * the biome `mist` multiplier, the weather `fogMultiplier` and `nightness`
- * working on the backdrop exactly as they work on the ribbon — a fan whose
- * haze was painted in would go flat the moment a fog bank rolled through.
+ * ## The profile
+ *
+ * Per azimuth the surface is the upper envelope of three simple pieces:
+ *
+ * - a **rim plane** a few metres under the anchor, which is what the nearest
+ *   rings sit on. Under rather than level with it for two reasons: sampling
+ *   error must never lift the rim above real terrain, and the rim has to hang
+ *   steeply enough that a ray passing beneath it meets the ribbon before it
+ *   reaches the sky (`FAR_LAND_INNER_RADIUS`);
+ * - a **spur**: a low cone standing for the nearer hills, 240-400 m tall at the
+ *   outer radius;
+ * - a **range**: the tall cone that carries the silhouette, `FAR_LAND_RIDGE_HEIGHT`
+ *   plus its wander at the outer radius.
+ *
+ * Each cone is written as `A·(r/R) - b·(1 - r/R)`: it reaches `A` at the outer
+ * radius and is sunk `b` metres at the eye's own position, so `b` is exactly
+ * the knob that decides **how far out that piece of land climbs into view**.
+ * Both `A` and `b` are noise functions of azimuth, which is where the relief
+ * comes from: the land breaks a 1.6 m eye's horizon at 260 m in some directions
+ * and 741 m in others, and the spur crosses under the range at a radius that
+ * wanders between 265 m and 1206 m, leaving a crease — a crest line that runs
+ * *around* the eye the way a real ridge does rather than radiating out from it.
+ *
+ * That azimuth spread is what the haze turns into layers, and it is the whole
+ * of the relief the eye actually reads. Elevation is monotonic in radius (see
+ * below), so a nearer crest can never occlude a further one; what varies is
+ * *which distance* sits at a given elevation, and therefore how much of its own
+ * colour it has left. Two degrees above the eye the surface is 391 m out in the
+ * clearest direction and 951 m in the haziest — 74% of the land colour against
+ * 17% — and at six degrees, 940 m against 1652 m.
+ *
+ * Two properties are worth stating because they are what makes the shape safe:
+ *
+ * - **Elevation is monotonic in radius from every eye height.** `A·(r/R) -
+ *   b·(1-r/R)` divided by `r` is `(A + b)/R - (b + eye)/r`, which increases in
+ *   `r` for any `b >= 0` and any eye at or above the anchor; a constant plane
+ *   at `-FAR_LAND_RIM_DROP` gives `-(FAR_LAND_RIM_DROP + eye)/r`, which also
+ *   increases; and the upper envelope of functions whose elevation increases
+ *   has an elevation that increases. So the surface never overlaps itself, at
+ *   any eye height, by construction rather than by tuning.
+ * - **The silhouette clears every sky gap from every eye a shot can take.** The
+ *   fan is continuous from the rim to the ridge, so it covers every elevation
+ *   between them; the rim is below the horizon and the ridge is above
+ *   `FAR_LAND_GAP_ANGLE_DEG` for any eye up to `FAR_LAND_MAX_EYE`. See those
+ *   two constants for the derivation — the ridge height is the thing that has
+ *   to hold at 0.65 m (`heroLowFront`) and at 27 m (`craneReveal`) alike, and a
+ *   guarantee that holds at one eye height and fails at another is not one.
+ *
+ * ## Haze
+ *
+ * There is no haze constant here any more, and there should not be one. The
+ * fan fogs on the distance it actually occupies, because that distance is now
+ * honest: whatever climbs above the ribbon's edge is a few hundred metres to a
+ * kilometre and a half out, and fogs as land at that distance does. It is not
+ * honest in every direction at once — see `FAR_LAND_RANGE_SINK` for the one
+ * case that cannot be, and what the azimuth spread does about it. Past about
+ * 1.8 km `FogExp2` at
+ * `FOG_BASE_DENSITY` has taken everything anyway (2.8% of contrast survives at
+ * 1500 m, 0.2% at 2000 m), so scaling the outer rings' fog depth buys nothing
+ * that saturation has not already bought — which is why the old
+ * `FAR_LAND_HAZE_SCALE` could only ever spend its effect on the *near* rings,
+ * flattening the one band that had colour left to lose. Measured at the
+ * defaults it left the whole visible fan between 96% and 100% hazed: eight
+ * levels of blue from the bottom of the band to the top, a slab. On the
+ * grounded profile the same columns run 82 to 113 levels, and the foot of the
+ * band keeps up to 74% of its land colour.
+ *
+ * That the fog is the scene's own also keeps the biome `mist` multiplier, the
+ * weather `fogMultiplier` and `nightness` working on the backdrop exactly as
+ * they work on the ribbon, for free and with no shader injection.
+ *
+ * The other half of the milk was the fog *colour*, and that lives in `main.ts`
+ * (`FOG_SKY_RISE`, `FOG_AERIAL_MIX`): the top of this band saturates to it, so
+ * it has to converge on the sky the band is seen against — which is the dome a
+ * little way up, not the horizon — or the fan keeps a hard edge against the sky
+ * no matter what its geometry does.
+ *
+ * ## Ordering
+ *
+ * It never writes depth and is drawn before every world mesh, so terrain and
+ * scenery always paint over it and there is no depth to fight at the join. It
+ * is not true that it occludes nothing: it deliberately covers the sky dome,
+ * and it is ordered ahead of the sun and moon precisely so it does *not* cover
+ * those — see `renderOrder` in the constructor.
+ *
+ * A caution that survives from the fold-fix work: at the road's tightest bends
+ * the compressed ribbon stops nearer than it does elsewhere, and scenery
+ * standing on it can still leave sky under a canopy that no horizon can close.
+ * Measure with the scenery meshes hidden to see this module's own behaviour
+ * separately from that.
  */
 
 /**
- * Innermost radius, metres. Must sit inside the ribbon in every direction so
- * the fan's inner rim is always buried under real terrain: the ribbon reaches
- * ±165 m laterally and `BEHIND * CHUNK_LEN` = 180 m behind the car.
+ * Innermost radius, metres.
+ *
+ * Two things bound it, and the second is the one that bites.
+ *
+ * It must sit inside the ribbon in every direction, and the binding case there
+ * is not the nominal ±165 m — it is the ribbon on the *inside* of the tightest
+ * bend, where `foldSafeLateral` compresses the far columns onto an asymptote at
+ * `FOLD_LIMIT` (0.85) of the local radius. At the analytic minimum radius of
+ * 87.7 m that is 74.5 m of ground, so anything further out than that can be
+ * left uncovered at some bend somewhere.
+ *
+ * And it sets how *steeply* the rim hangs, which is what closes the world
+ * underneath the fan. With `FAR_LAND_RIM_DROP` it fixes the shallowest ray that
+ * can pass under the rim: `(drop + eye) / this` metres of fall per metre out.
+ * Anything steeper has to meet real terrain inside the ribbon or it escapes to
+ * the sky, and the terrain is not obliging — it falls away from the road fast
+ * enough to outrun a shallow ray for a long way. Marched against
+ * `terrainHeight` over 6450 rays (40 km of road, five lateral stands, five eye
+ * heights, both directions), the escape rate is 14% at 70 m over a 2 m drop,
+ * one ray at 20 m over 2.5 m, and zero at or past 20 m over 3 m. This pair is
+ * 20 m and 5 m — a slope of 0.283, about 1.8x the last value that failed.
+ *
+ * The symptom of getting it wrong is specific and worth recognising: a thin
+ * band of sky a couple of rows deep, running the *whole width* of the frame at
+ * exactly the rim's own elevation. 13,692 px of it at s = 431.6 km (R 88.7 m)
+ * from a 0.65 m eye, at 70 m over a 2 m drop.
  */
-export const FAR_LAND_INNER_RADIUS = 120;
+export const FAR_LAND_INNER_RADIUS = 20;
 
 /**
  * Outermost radius, metres. Inside the sky dome (6000) and the camera's far
- * plane (9000); far enough that the ridge is fully fogged.
+ * plane (9000); far enough that the ridge is fully fogged several times over.
  */
 export const FAR_LAND_OUTER_RADIUS = 4000;
 
 /**
- * Elevation of the inner rim, degrees below the eye. Any ray steeper down than
- * this from a camera ~5 m over the road reaches the ground within ~120 m —
- * inside the ribbon — so nothing can show under the rim. Measured worst-case
- * terrain 120 m out is ~10.2° below the eye, which this clears.
+ * How far below the sampled ground the fan's rim sits, metres.
+ *
+ * Two jobs. The small one is tolerance: error in the ground sample — a damped
+ * anchor lagging a climb, a terrain triangle sampled between its vertices —
+ * must never lift the rim above the real surface and show a plate hovering over
+ * the fields. A metre or two would cover that.
+ *
+ * The load-bearing one is the escape-ray bound in `FAR_LAND_INNER_RADIUS`,
+ * which is what asks for five. It costs nothing on screen: at 20 m the rim is
+ * under the road itself, and the plane it sits on stays under the ribbon well
+ * past the hand-over at 165 m.
  */
-export const FAR_LAND_INNER_ANGLE_DEG = -10;
+export const FAR_LAND_RIM_DROP = 5;
 
 /**
- * **Floor** elevation of the ridge, degrees above the eye — the lowest the
- * silhouette reaches at any azimuth. This is the number that decides the fix:
- * the backdrop closes every sky gap below it, and nothing above it.
+ * Height of the range at the outer radius, metres — the **floor** of the
+ * silhouette, before its wander.
  *
- * Measured against the live scene, gaps start at 1.6° (the land silhouette
- * itself). How high they reach is set by curvature: on a straight the land
- * silhouette tops out near 5.5°, but the tighter the bend the nearer the
- * ribbon edge on its outside and the higher its silhouette, and at the road's
- * genuinely tightest bends — R 92.4 at s ~21.1 km, R 91.3 at s ~99.1 km,
- * R 88.7 at s ~431.6 km, against an analytic minimum of 87.7 m — it reaches
- * 6.64°. The floor clears that by ~1°, deliberately: those are the tightest
- * bends in 460 km of road, the trend against curvature is monotonic, and the
- * headroom is cheaper than re-deriving this from a screenshot later.
+ * This is the number that has to hold the sky-gap guarantee, and it has to hold
+ * it from every eye a shot can take. At radius `R` an eye `e` above the anchor
+ * sees the ridge at `atan((H - e) / R)`, so clearing `FAR_LAND_GAP_ANGLE_DEG`
+ * needs `H >= e + R * tan(7.6°)` = `e + 533.6`. At 650 m that covers every eye
+ * up to 116 m above the ground beneath it — far past the `FAR_LAND_MAX_EYE`
+ * the menu director can produce, and the headroom is free: the ridge is 100%
+ * fogged at any density the game asks for, so it costs pixels of sky that are
+ * fog-coloured either way.
  *
- * Do not tune this down against a mid-biome screenshot on a straight. That is
- * not the case that sets it. Sample a bend of known radius — `RoadPath`'s
- * curvature is a closed-form sum of four sines, so R is exactly 1/|k(s)| and
- * can be solved for rather than guessed at.
+ * Note what changed from the angle-based version this replaces. A ridge fixed
+ * at 7.6° *from the eye* is a different promise at every eye height, and it was
+ * derived at one of them. Fixing a height instead makes the weakest case the
+ * highest eye, which is a case that can be stated and tested.
  */
-export const FAR_LAND_RIDGE_ANGLE_DEG = 7.6;
+export const FAR_LAND_RIDGE_HEIGHT = 650;
 
 /**
- * How far the ridge wanders **above** the floor, degrees. Without a wander the
- * silhouette is a cone of constant elevation, which projects to a
- * dead-straight line and reads as a lid rather than as land. It is wider than
- * it needs to be for that: the wander has to stay a visible fraction of the
- * ridge's height over the horizon, and once the floor rose to clear the
- * tightest bend, 0.9° here had flattened into a band.
+ * How far the range's crest wanders **above** `FAR_LAND_RIDGE_HEIGHT`, metres.
  *
- * The wander is deliberately **one-sided** — `farLandAngle` maps the noise to
- * 0..1 rather than -1..1, so the ridge occupies [floor, floor + this] and is
- * never below the floor at any azimuth. Do not "clean this up" into a
- * symmetric ±wander: that drops the silhouette a full wander below the floor
- * on part of the circle, and whether a gap survives then depends on which
- * azimuth the dip happens to land on — closure by luck rather than by
- * construction, and a horizon that is whole except on the outside of a tight
- * bend reads as unfixed and is far harder to diagnose the second time. Folding
- * the noise upward costs half a wander of mean ridge height; getting the same
- * floor out of a symmetric wander would cost a whole one.
+ * One-sided, as the angle-based wander was and for the same reason: the noise
+ * is folded to 0..1 rather than -1..1, so the silhouette occupies
+ * [floor, floor + this] and is never below the floor at any azimuth. Do not
+ * "clean this up" into a symmetric ±wander — that drops the crest below the
+ * floor on part of the circle, and whether a sky gap survives then depends on
+ * which azimuth the dip happens to land on. Closure by luck rather than by
+ * construction, and a horizon that is whole except on the outside of one bend
+ * reads as unfixed and is far harder to diagnose the second time.
  *
- * Kept under the ridge profile's own slope at the rim so the elevation stays
- * monotonic in radius (see `farLandBaseAngle`).
+ * 120 m at 4 km is 1.7° of wander over a 9.2° ridge, which is what keeps the
+ * top edge from projecting to the dead-straight line that reads as a lid.
  */
-export const FAR_LAND_RIDGE_NOISE_DEG = 1.4;
+export const FAR_LAND_RIDGE_RELIEF = 120;
 
 /**
- * Radius walked through `noise2` around the azimuth circle. Sampling the noise
- * at (cos az, sin az) makes it exactly periodic, so the fan has no seam; this
- * scale sets how many undulations fit around the horizon (21, so ~5 across the
- * ~88° the camera sees).
+ * How far the range is sunk below the anchor at the eye's own position,
+ * metres — minimum, and the span the azimuth noise adds on top.
+ *
+ * This is the knee: the cone crosses ground level at `R * b / (A + b)`, so
+ * b = 90 puts it at 486 m and b = 200 at 949 m. It is the single number that
+ * decides how much land colour survives in the band, because it decides how
+ * near the land at the bottom of the band is: at 486 m `FogExp2` at the base
+ * density has taken 38% of the contrast, at 950 m it has taken 74%, and past
+ * 1.8 km it has taken all of it.
+ *
+ * Wanting it as near as possible is not the whole story, which is why the span
+ * is wide rather than the minimum being lower. A backdrop that climbs into view
+ * very near the eye is crisper than the ribbon's *forward* cut 1320 m away, and
+ * a crisp band sitting on a pale strip of terrain is the failure the old haze
+ * scale existed to prevent. Spreading the knee across azimuth means some
+ * directions carry colour and others carry haze, which is both what a landscape
+ * does and what keeps the near case rare enough to stay honest — the rolling
+ * height field almost always puts a crest nearer than the cut anyway, and a
+ * crest at 400 m is *nearer* than the fan above it in every one of these
+ * directions.
  */
-export const FAR_LAND_NOISE_SCALE = 24;
+export const FAR_LAND_RANGE_SINK = 90;
+/** Span the azimuth noise adds to `FAR_LAND_RANGE_SINK`. See it. */
+export const FAR_LAND_RANGE_SINK_RELIEF = 110;
 
 /**
- * How much further away the fan fogs than it geometrically is, at full ramp.
+ * Height of the spur — the nearer, lower cone — at the outer radius, metres,
+ * and the span the azimuth noise adds.
  *
- * The fan depicts the land past the ribbon, and the ribbon stops at
- * `AHEAD * CHUNK_LEN` = 1320 m. A sight line grazing the horizon from a camera
- * ~5 m over the road leaves the ribbon there and meets the fan somewhere in
- * [-1.1 deg, +0.7 deg] of elevation — the spread is 1320 m of road elevation
- * tilting the join — which is fan radii 295 m to 383 m. The binding end is the
- * near one: `1320 / 294.9 = 4.477`, rounded up.
- *
- * Round *up*, because the two directions are not symmetric. A fan hazier than
- * the terrain it stands behind is just more distance; a fan **crisper** than
- * that terrain is a vivid band sitting on a pale strip of ground, which is the
- * failure this constant exists to prevent — measured at scale 1 it is a solid
- * green cone with a hard silhouette, and at 2 it is still a green wall. Note
- * that the density cancels out of `r * S >= AHEAD * CHUNK_LEN`, so the
- * guarantee holds in every biome, at every hour and in every weather rather
- * than at one tuned density.
- *
- * The far end of the join band lands at 1.31x the cut, which is the price of
- * covering the near end. Past 5 or so there is nothing left to buy: 4.5 and 7
- * are indistinguishable on screen because the whole band is already saturated.
- *
- * Raising this does not buy a nearer join — it buys a *further* one. The join
- * distance is `AHEAD * CHUNK_LEN`, so this and `AHEAD` move together or not at
- * all.
+ * Well under `FAR_LAND_RIDGE_HEIGHT`, so the range always wins the silhouette
+ * and the spur always ends up crossing under it somewhere. That crossing is the
+ * point of the spur: it is a crease in the surface at 0.9-1.7 km, wandering
+ * with azimuth, which is a crest line rather than a shading gradient. Below it
+ * the visible land is the spur's, which climbs into view nearer than the range
+ * does and so carries more colour.
  */
-export const FAR_LAND_HAZE_SCALE = 4.5;
+export const FAR_LAND_SPUR_HEIGHT = 240;
+/** Span the azimuth noise adds to `FAR_LAND_SPUR_HEIGHT`. See it. */
+export const FAR_LAND_SPUR_RELIEF = 160;
 
 /**
- * Ring parameter at which the haze scale reaches full.
+ * How far the spur is sunk at the eye, metres, and the span the noise adds.
  *
- * It ramps from 1 rather than starting there, because the fan's inner rings
- * are not depicting distance — they are the buried rim, sitting a few tens of
- * metres from the eye under real terrain. Where the ribbon narrows on the
- * inside of a tight bend and the rim shows through (§5.3), a rim already at
- * full scale would be a saturated smudge against ground 75 m away.
- *
- * 0.25 is the ceiling, not a preference: the lowest ring a horizon-grazing ray
- * can reach is t = 0.2564, and `FAR_LAND_HAZE_SCALE`'s guarantee is derived at
- * *full* scale, so the ramp has to be finished before that ring. It is also a
- * floor's width above the rays that are buried on a straight (everything below
- * -1.7 deg, t = 0.235), so almost the whole ramp lives under real terrain.
- * Kept smooth (smoothstep, C1 at both ends) so no ring boundary reads as a
- * band on the horizon.
+ * Smaller than `FAR_LAND_RANGE_SINK` so the spur is the nearer of the two: it
+ * crosses ground level at `R * b / (A + b)`, which is 235-903 m across the two
+ * fields' extremes against the range's 419-941 m, and the pair that a given
+ * azimuth actually draws puts the visible edge at 260-741 m.
  */
-export const FAR_LAND_HAZE_RAMP_T = 0.25;
+export const FAR_LAND_SPUR_SINK = 25;
+/** Span the azimuth noise adds to `FAR_LAND_SPUR_SINK`. See it. */
+export const FAR_LAND_SPUR_SINK_RELIEF = 45;
 
-/** Radial rings. Half of them land in the band that is actually visible. */
-export const FAR_LAND_RINGS = 14;
+/**
+ * Radii walked through `noise2` around the azimuth circle, one per field.
+ *
+ * Sampling the noise at `(cos az, sin az)` scaled makes it exactly periodic, so
+ * the fan has no seam; the scale sets how many undulations fit around the
+ * horizon, roughly `0.85 * scale` of them, so a 62° lens sees about a sixth of
+ * that. The four fields are given different radii (and one an offset) so they
+ * walk different circles of the same noise and do not move together: the
+ * silhouette ripples fastest, the range's knee slowest — broad sweeps of near
+ * and far land rather than a picket fence.
+ */
+export const FAR_LAND_RIDGE_NOISE_SCALE = 24;
+/** Azimuth-circle radius for the range's knee. See `FAR_LAND_RIDGE_NOISE_SCALE`. */
+export const FAR_LAND_SINK_NOISE_SCALE = 11;
+/** Azimuth-circle radius for the spur's height. See `FAR_LAND_RIDGE_NOISE_SCALE`. */
+export const FAR_LAND_SPUR_NOISE_SCALE = 17;
+/** Azimuth-circle radius for the spur's knee. See `FAR_LAND_RIDGE_NOISE_SCALE`. */
+export const FAR_LAND_SPUR_SINK_NOISE_SCALE = 31;
 
-/** Azimuth divisions. 96 keeps the ridge smooth at the frame edges. */
-export const FAR_LAND_SEGMENTS = 96;
+/**
+ * Elevation, in degrees above the eye, that the silhouette has to clear.
+ *
+ * The fan closes every sky gap below its silhouette and none above it, so this
+ * is the height of the highest gap the ribbon's own cut can leave. Measured
+ * against the live scene by rendering the chunk meshes to a mask and reading
+ * the elevation of the topmost terrain pixel per column: on unfolded road the
+ * ribbon's edge silhouette tops out at 6.63° (s = 99.1 km, R 91.3 m, eye
+ * 1.6 m), and gaps live under it. The old angle-based ridge floor was set at
+ * 7.6° against the same measurement, and this keeps that number so the two are
+ * comparable — `FAR_LAND_RIDGE_HEIGHT` then clears it from every eye height
+ * rather than from the one it was measured at.
+ */
+export const FAR_LAND_GAP_ANGLE_DEG = 7.6;
+
+/**
+ * Highest the eye is ever expected to sit above the ground beneath it, metres.
+ *
+ * `craneReveal` lifts to 27 m over the *road surface* at its own (s, lat); the
+ * terrain there can sit up to ~14 m below the road out in the fields, and
+ * `MenuCamera`'s clearance lift can raise the eye further to clear a rise
+ * between it and the car. 60 m covers that with room; the ridge as built holds
+ * the guarantee to 116 m (see `FAR_LAND_RIDGE_HEIGHT`), so the margin here is
+ * not load-bearing — it is the number the test sweeps to.
+ */
+export const FAR_LAND_MAX_EYE = 60;
+
+/**
+ * How far the surface normals are pulled back toward straight up, 0..1.
+ *
+ * The toon ramp is four flat stops, so a normal that tilts far enough to cross
+ * a stop boundary paints a hard line. On the creases that is exactly what is
+ * wanted — a crest reads as a crest. Across the open slopes it is not, so the
+ * normals are leaned back toward vertical, which keeps the shading inside one
+ * or two stops and lets the haze gradient carry the depth.
+ */
+export const FAR_LAND_NORMAL_SOFTEN = 0.55;
+
+/** Vertex-colour swing across the fan, as a fraction of the biome ground tone. */
+export const FAR_LAND_TINT_RELIEF = 0.07;
+
+/** Radial rings. */
+export const FAR_LAND_RINGS = 24;
+
+/** Azimuth divisions. Keeps the ridge and the creases smooth at frame edges. */
+export const FAR_LAND_SEGMENTS = 128;
+
+/**
+ * Metres the **vantage** must move in one frame for the anchor to snap rather
+ * than damp, in road coordinates.
+ *
+ * The anchor follows the terrain under the camera, and a raw per-frame sample
+ * jitters: the drawn surface is flat triangles, and a menu eye crossing them at
+ * speed steps between facets. At 800 m — the near edge of the visible band — a
+ * metre of anchor moves the horizon about a pixel, so the jitter is visible and
+ * the anchor is damped. What damping must not do is slide the whole horizon
+ * across the frame after a cut, which at `FAR_LAND_ANCHOR_DAMP` takes ~0.8 s to
+ * settle and is the only motion on screen during `roadsideStatic`, the one shot
+ * whose rig deliberately does not move.
+ *
+ * The quantity here is the vantage, not the ground height, and that distinction
+ * is the whole of it: a cut is a discontinuity in **where the camera is**, and
+ * the ground it lands on may happen to be at a similar height. Thresholding the
+ * height instead damped 59% of `roadsideStatic` cuts — median 6.38 m of anchor
+ * move, which tilts the crest at 400 m by 0.92°, some 30 px of horizon drift
+ * down that shot's 26° lens.
+ *
+ * 8 m is derived from the two distributions, measured over 401 cuts on the
+ * shipping seed at car speeds from 18 to 55 m/s:
+ *
+ * - within a shot the vantage never moves more than **1.11 m** in a frame, and
+ *   the ground under it never more than 0.06 m — the shots' own eye moves are
+ *   slow and continuous next to a cut;
+ * - every cut that moves the ground more than 2 m jumps the vantage by at least
+ *   **14.7 m**, and at this threshold the 18 cuts in 401 that still damp move
+ *   the ground by at most **0.34 m** — 0.05° at 400 m, under two pixels.
+ *
+ * Round *down* if it ever needs revisiting, because the two errors are not
+ * symmetric. A missed cut slides the horizon for most of a second. A false
+ * positive — a hitching frame at the `dt` clamp of 0.1 s and top speed puts a
+ * shot's own motion near 6.6 m — snaps the anchor across at most a few tenths
+ * of a metre of ground, on a frame that is already dropping.
+ *
+ * Inferring the cut rather than being told about it is deliberate.
+ * `MenuCamera` has a `fresh` flag and could hand it over, but it is consumed
+ * inside its own `update`, it says nothing about the play rig, and it says
+ * nothing about a world re-seed. The measured separation above is wide enough
+ * that the inference costs nothing and covers all three. `reanchor` is there
+ * for the case inference genuinely cannot see — see it.
+ */
+export const FAR_LAND_CUT_DISTANCE = 8;
+
+/** Damping rate for the anchor, per second. See `FAR_LAND_CUT_DISTANCE`. */
+export const FAR_LAND_ANCHOR_DAMP = 6;
 
 const GROUND = (b: BiomeVisual): string => b.ground;
 
-/** Radius of ring parameter `t` (0 = inner rim, 1 = ridge), metres. */
+/** Radius of ring parameter `t` (0 = inner rim, 1 = outer ring), metres. */
 export function farLandRadius(t: number): number {
   return FAR_LAND_INNER_RADIUS * Math.pow(FAR_LAND_OUTER_RADIUS / FAR_LAND_INNER_RADIUS, t);
 }
 
 /**
- * Mean elevation angle of ring `t`, radians.
+ * One azimuth-periodic noise field in 0..1.
  *
- * The easing rushes through the low angles — everything under the land
- * silhouette is wasted geometry — while keeping the slope at the ridge well
- * above the noise term's own slope, which is what guarantees the profile stays
- * monotonic once the ridge wander is added.
+ * Sampled on a circle so the fan closes exactly at the seam. The fold to 0..1
+ * is clamped rather than merely scaled: mapping -1..1 into 0..1 is only a
+ * guarantee while `noise2` stays inside ±1, which is a property of a sum of
+ * sines in `materials.ts` that nothing there promises or tests. The clamp makes
+ * every band below hold whatever that function later does, so this file's
+ * invariants do not rest on another module's incidental range.
  */
-export function farLandBaseAngle(t: number): number {
-  const eased = 0.25 * t + 0.75 * (1 - Math.pow(1 - t, 3));
-  return THREE.MathUtils.degToRad(
-    FAR_LAND_INNER_ANGLE_DEG + (FAR_LAND_RIDGE_ANGLE_DEG - FAR_LAND_INNER_ANGLE_DEG) * eased,
+function azField(az: number, scale: number, phase: number): number {
+  const n = noise2(Math.cos(az) * scale + phase, Math.sin(az) * scale);
+  return Math.min(1, Math.max(0, 0.5 + 0.5 * n));
+}
+
+/**
+ * One cone of the profile: `A` metres tall at the outer radius, sunk `b` metres
+ * at the eye's own position.
+ *
+ * Its elevation from an eye `e` above the anchor is `atan((A + b)/R - (b + e)/r)`,
+ * which increases with `r` for every `b >= 0` and every `e >= 0`. That is the
+ * monotonicity the whole profile inherits.
+ */
+function cone(r: number, top: number, sink: number): number {
+  const u = r / FAR_LAND_OUTER_RADIUS;
+  return top * u - sink * (1 - u);
+}
+
+/**
+ * Height of the surface at radius `r` and azimuth `az`, metres above the ground
+ * anchor (which is the ground under the camera, not the eye).
+ *
+ * The upper envelope of the rim plane, the spur and the range — see the module
+ * comment. Every piece has an elevation that rises with radius, and the upper
+ * envelope of such pieces does too, so the surface never overlaps itself.
+ */
+export function farLandHeightAt(r: number, az: number): number {
+  const range = cone(
+    r,
+    FAR_LAND_RIDGE_HEIGHT + FAR_LAND_RIDGE_RELIEF * azField(az, FAR_LAND_RIDGE_NOISE_SCALE, 0),
+    FAR_LAND_RANGE_SINK + FAR_LAND_RANGE_SINK_RELIEF * azField(az, FAR_LAND_SINK_NOISE_SCALE, 3.7),
   );
+  const spur = cone(
+    r,
+    FAR_LAND_SPUR_HEIGHT + FAR_LAND_SPUR_RELIEF * azField(az, FAR_LAND_SPUR_NOISE_SCALE, 11.3),
+    FAR_LAND_SPUR_SINK +
+      FAR_LAND_SPUR_SINK_RELIEF * azField(az, FAR_LAND_SPUR_SINK_NOISE_SCALE, 19.1),
+  );
+  return Math.max(-FAR_LAND_RIM_DROP, Math.max(range, spur));
 }
 
-/**
- * Elevation angle at ring `t` and azimuth `az`, radians.
- *
- * The noise is folded to 0..1, not -1..1: the ridge wanders upward off
- * `FAR_LAND_RIDGE_ANGLE_DEG` and never below it, which is what makes the
- * closure a guarantee rather than a coincidence of azimuth. The `t * t` weight
- * takes the wander to exactly zero at the inner rim, so the rim stays a known
- * angle that the terrain is certain to bury.
- *
- * The fold is clamped rather than merely scaled. Mapping -1..1 into 0..1 is
- * only a guarantee while `noise2` stays inside +/-1, which is a property of a
- * sum of sines in `materials.ts` that nothing there promises or tests. The
- * clamp makes the band [floor, floor + wander] hold whatever that function
- * later does, so this file's invariant does not rest on another module's
- * incidental range.
- */
-export function farLandAngle(t: number, az: number): number {
-  const n = noise2(Math.cos(az) * FAR_LAND_NOISE_SCALE, Math.sin(az) * FAR_LAND_NOISE_SCALE);
-  const wander = Math.min(1, Math.max(0, 0.5 + 0.5 * n));
-  return farLandBaseAngle(t) + THREE.MathUtils.degToRad(FAR_LAND_RIDGE_NOISE_DEG) * t * t * wander;
-}
-
-/** Height of ring `t` at azimuth `az`, metres relative to the camera. */
+/** Height of ring `t` at azimuth `az`, metres above the ground anchor. */
 export function farLandHeight(t: number, az: number): number {
-  return farLandRadius(t) * Math.tan(farLandAngle(t, az));
+  return farLandHeightAt(farLandRadius(t), az);
 }
 
 /**
- * Multiplier on ring `t`'s fog depth — 1 at the buried rim, rising smoothly to
- * `FAR_LAND_HAZE_SCALE` by `FAR_LAND_HAZE_RAMP_T` and flat past it.
- *
- * Monotonic by construction, which matters: a non-monotonic haze would put a
- * clearer ring beyond a hazier one and read as a hole in the backdrop.
+ * Elevation of ring `t` at azimuth `az` as seen from an eye `eye` metres above
+ * the ground anchor, radians. Rises monotonically in `t` for every `eye >= 0`.
  */
-export function farLandHazeScale(t: number): number {
-  const x = Math.min(1, Math.max(0, t / FAR_LAND_HAZE_RAMP_T));
-  return 1 + (FAR_LAND_HAZE_SCALE - 1) * x * x * (3 - 2 * x);
+export function farLandElevation(t: number, az: number, eye: number): number {
+  return Math.atan2(farLandHeight(t, az) - eye, farLandRadius(t));
 }
 
-/** Implied distance of ring `t`, metres — what its haze depicts. */
-export function farLandHazeDepth(t: number): number {
-  return farLandRadius(t) * farLandHazeScale(t);
+/**
+ * Outward-facing surface normal at ring `t`, azimuth `az`, written into `out`.
+ *
+ * Central differences on the height field in radius and azimuth, leaned back
+ * toward vertical by `FAR_LAND_NORMAL_SOFTEN`. Differencing across the creases
+ * rather than reading each cone's own slope is deliberate: it rounds the crest
+ * over one ring instead of stamping a hard edge onto a surface whose radial
+ * sampling is coarse out there.
+ */
+export function farLandNormal(t: number, az: number, out: THREE.Vector3): THREE.Vector3 {
+  const r = farLandRadius(t);
+  const dr = Math.max(1, r * 0.03);
+  const da = 0.03;
+  const dhdr = (farLandHeightAt(r + dr, az) - farLandHeightAt(r - dr, az)) / (2 * dr);
+  const dhda = (farLandHeightAt(r, az + da) - farLandHeightAt(r, az - da)) / (2 * da * r);
+  // Geometry is x = sin(az) * r, z = cos(az) * r, so the outward radial is
+  // (sin az, 0, cos az) and the tangent is its azimuth derivative.
+  const sa = Math.sin(az);
+  const ca = Math.cos(az);
+  out.set(-dhdr * sa - dhda * ca, 1, -dhdr * ca + dhda * sa).normalize();
+  out.y += FAR_LAND_NORMAL_SOFTEN;
+  return out.normalize();
 }
 
 /** Build the fan's geometry. Called once; the mesh is never rebuilt. */
@@ -273,26 +494,29 @@ export function buildFarLandGeometry(): THREE.BufferGeometry {
   const pos = new Float32Array(count * 3);
   const norm = new Float32Array(count * 3);
   const col = new Float32Array(count * 3);
-  const haze = new Float32Array(count);
+  const n = new THREE.Vector3();
 
   for (let i = 0; i < rings; i++) {
     const t = i / (rings - 1);
     const r = farLandRadius(t);
-    const hz = farLandHazeScale(t);
     for (let j = 0; j < segs; j++) {
       const az = (j / segs) * Math.PI * 2;
       const k = (i * segs + j) * 3;
       pos[k] = Math.sin(az) * r;
-      pos[k + 1] = farLandHeight(t, az);
+      pos[k + 1] = farLandHeightAt(r, az);
       pos[k + 2] = Math.cos(az) * r;
-      // Flat land normals: the fan is nearly horizontal, and matching the
-      // ribbon's far field exactly keeps the toon ramp on the same step.
-      norm[k + 1] = 1;
-      const v = 1 + noise2(az * 3, t * 7) * 0.05;
+      farLandNormal(t, az, n);
+      norm[k] = n.x;
+      norm[k + 1] = n.y;
+      norm[k + 2] = n.z;
+      // Patchwork: one noise walked outward on a growing circle, so it varies
+      // in radius as well as azimuth and still closes at the seam. Without it
+      // the open ground between the creases is a single flat tone.
+      const ring = 5 + 26 * t;
+      const v = 1 + noise2(Math.cos(az) * ring, Math.sin(az) * ring) * FAR_LAND_TINT_RELIEF;
       col[k] = v;
       col[k + 1] = v;
       col[k + 2] = v;
-      haze[i * segs + j] = hz;
     }
   }
 
@@ -301,7 +525,7 @@ export function buildFarLandGeometry(): THREE.BufferGeometry {
   // far to near makes the draw correct by painter's algorithm alone, which is
   // what lets the mesh skip depth writes.
   const idx = new Uint32Array((rings - 1) * segs * 6);
-  let n = 0;
+  let m = 0;
   for (let i = rings - 2; i >= 0; i--) {
     for (let j = 0; j < segs; j++) {
       const j2 = (j + 1) % segs;
@@ -309,12 +533,12 @@ export function buildFarLandGeometry(): THREE.BufferGeometry {
       const b = i * segs + j2;
       const c = (i + 1) * segs + j;
       const d = (i + 1) * segs + j2;
-      idx[n++] = a;
-      idx[n++] = c;
-      idx[n++] = b;
-      idx[n++] = b;
-      idx[n++] = c;
-      idx[n++] = d;
+      idx[m++] = a;
+      idx[m++] = c;
+      idx[m++] = b;
+      idx[m++] = b;
+      idx[m++] = c;
+      idx[m++] = d;
     }
   }
 
@@ -322,53 +546,41 @@ export function buildFarLandGeometry(): THREE.BufferGeometry {
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('normal', new THREE.BufferAttribute(norm, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-  // Read by the fog-depth injection in FarLand's constructor. Harmless on a
-  // scene with no fog, where the shader never declares it.
-  geo.setAttribute('aHaze', new THREE.BufferAttribute(haze, 1));
   geo.setIndex(new THREE.BufferAttribute(idx, 1));
   return geo;
 }
 
 /**
- * One draw call of distant land, anchored to the camera. Add it once, call
- * `update` every frame; it rebuilds no geometry and does no per-chunk work.
- * It is not allocation-free: the biome blend it calls allocates per call —
- * that is `biomeAt`'s, tracked separately, not this module's to fix.
+ * One draw call of distant land, standing on the ground under the camera. Add
+ * it once, call `update` every frame; it rebuilds no geometry and does no
+ * per-chunk work. It is not allocation-free: the biome blend it calls allocates
+ * per call — that is `biomeAt`'s, tracked separately, not this module's to fix.
  */
 export class FarLand {
   readonly mesh: THREE.Mesh;
   private mat: THREE.MeshToonMaterial;
+  /** Damped ground height the fan is standing on, world Y. */
+  private groundY = 0;
+  private anchored = false;
+  /** Vantage the anchor was last sampled at, for cut detection. */
+  private lastS = 0;
+  private lastLat = 0;
 
   constructor(private scene: THREE.Scene) {
     this.mat = new THREE.MeshToonMaterial({
       color: 0xffffff,
       vertexColors: true,
       gradientMap: toonRamp(),
-      // The ridge is above the eye, so its underside faces the camera; the
-      // inner rim is below and shows its top. One mesh sees both.
+      // The ridge is above the eye, so its underside faces the camera; the rim
+      // is below and shows its top. One mesh sees both.
       side: THREE.DoubleSide,
       // Never occlude: the fan draws first and leaves the depth buffer alone,
       // so every real mesh paints over it and there is no seam to z-fight.
       depthWrite: false,
     });
-    // Aerial perspective: fog the fan on the distance it *depicts* rather than
-    // the distance it occupies (see `FAR_LAND_HAZE_SCALE`). three writes
-    // `vFogDepth = -mvPosition.z` in <fog_vertex>, so scaling it right after is
-    // the whole change; the fragment side is stock. Guarded on USE_FOG, which
-    // three only defines when the scene has fog and the material accepts it —
-    // without the guard a fog-less scene would reference an undeclared varying
-    // and fail to link.
-    this.mat.onBeforeCompile = (shader) => {
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nattribute float aHaze;')
-        .replace(
-          '#include <fog_vertex>',
-          '#include <fog_vertex>\n#ifdef USE_FOG\n\tvFogDepth *= aHaze;\n#endif',
-        );
-    };
     this.mesh = new THREE.Mesh(buildFarLandGeometry(), this.mat);
     this.mesh.name = 'farLand';
-    // Centred on the camera and 4 km across, so it always intersects the
+    // Centred on the camera and 8 km across, so it always intersects the
     // frustum — the test can only cost time.
     this.mesh.frustumCulled = false;
     // Between the sky dome (-10) and the sun/moon discs (-9), and well before
@@ -387,13 +599,54 @@ export class FarLand {
   }
 
   /**
-   * Follow the camera and take the biome's ground tone at `pathS`, the same
-   * blend the terrain ribbon colours itself from. `camPos` must be the
-   * camera's position *this* frame, after any floating-origin rebase (§5.2).
+   * Stand the fan on the ground under the camera and take the biome's ground
+   * tone there — the same blend the terrain ribbon colours itself from.
+   *
+   * `camPos` must be the camera's position *this* frame, after any
+   * floating-origin rebase (§5.2). The rebase shifts X and Z only, so the
+   * sampled height needs no rebase handling of its own.
+   *
+   * `camS`/`camLat` are the vantage in road coordinates — where the ground is
+   * sampled, and what a cut is detected in. In attract mode they are the
+   * director's own, and must be: `roadsideStatic` stands as much as
+   * `MENU_MAX_LEAD` = 260 m down the road from the car, over land of its own
+   * height. In play the caller passes the *car's*, and that stands in for the
+   * chase rig on purpose. The rig trails 9.5-12.7 m behind the car on the road
+   * itself, where `|lat| < 6.2` puts the terrain flat on the road surface, so
+   * the two samples differ only by the road's own grade over that gap —
+   * bounded by the maximum slope the generator can produce, 0.071, giving
+   * 0.9 m. That is well inside `FAR_LAND_RIM_DROP` = 5 m, which is the margin
+   * that decides whether any of this can surface, so the rig gains nothing
+   * from an accessor of its own.
    */
-  update(camPos: THREE.Vector3, pathS: number): void {
-    this.mesh.position.copy(camPos);
-    blendColor(pathS, GROUND, this.mat.color);
+  update(path: RoadPath, camPos: THREE.Vector3, camS: number, camLat: number, dt: number): void {
+    const ground = terrainMeshHeight(path, camS, camLat);
+    // A cut is a jump in the vantage, not in the height it lands on.
+    const jumped = Math.hypot(camS - this.lastS, camLat - this.lastLat) > FAR_LAND_CUT_DISTANCE;
+    this.lastS = camS;
+    this.lastLat = camLat;
+    if (!this.anchored || jumped) {
+      this.groundY = ground;
+      this.anchored = true;
+    } else {
+      this.groundY = THREE.MathUtils.damp(this.groundY, ground, FAR_LAND_ANCHOR_DAMP, dt);
+    }
+    this.mesh.position.set(camPos.x, this.groundY, camPos.z);
+    blendColor(camS, GROUND, this.mat.color);
+  }
+
+  /**
+   * Drop the anchor so the next `update` takes its ground sample raw.
+   *
+   * For the one discontinuity the cut detection in `update` cannot see:
+   * `RoadPath.reset` re-bases the curve at a new origin, so the *world* the
+   * heights are measured in changes underneath the anchor and the height it is
+   * holding no longer refers to anything. `main.ts` calls this from
+   * `seedWorldAt`, alongside the other resets a teleport owes (RoadPath,
+   * ChunkManager, Pickups).
+   */
+  reanchor(): void {
+    this.anchored = false;
   }
 
   dispose(): void {

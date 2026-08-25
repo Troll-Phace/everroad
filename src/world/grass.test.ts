@@ -268,6 +268,17 @@ function grassMeshes(cm: ChunkManager): THREE.InstancedMesh[] {
   return out;
 }
 
+/**
+ * One frame of `main.ts`'s loop, as far as ground cover is concerned: the
+ * ribbon pass, then the cover pass `ChunkManager` deliberately keeps separate
+ * so it can run *after* the camera has been placed (`updateCover`). Driving
+ * passes no cinematic eye, which is the case every test below exercises.
+ */
+function frame(cm: ChunkManager, carS: number): void {
+  cm.update(carS);
+  cm.updateCover(carS, null);
+}
+
 /** Chunk index a grass mesh belongs to, as ChunkManager stamped it. */
 function chunkIndexOf(mesh: THREE.InstancedMesh): number {
   return mesh.userData.chunkIndex as number;
@@ -280,7 +291,7 @@ describe('GrassField placement', () => {
     const path = new RoadPath(SEED);
     const field = new GrassField(quality);
     const cm = new ChunkManager(path, new THREE.Scene(), field);
-    cm.update(carS);
+    frame(cm, carS);
     return { path, field, cm };
   }
 
@@ -322,7 +333,7 @@ describe('GrassField placement', () => {
     const { cm } = build('medium', 600);
     const expected = GRASS_BEHIND + GRASS_TIERS.medium.ahead + 1;
     for (let i = 1; i <= 12; i++) {
-      cm.update(600 + i * CHUNK_LEN);
+      frame(cm, 600 + i * CHUNK_LEN);
       expect(grassMeshes(cm).length).toBe(expected);
     }
   });
@@ -331,7 +342,7 @@ describe('GrassField placement', () => {
     const { cm, field } = build('low', 600);
     expect(grassMeshes(cm)[0].count).toBe(GRASS_TIERS.low.clusters);
     field.setQuality('high');
-    cm.update(600);
+    frame(cm, 600);
     const meshes = grassMeshes(cm);
     expect(meshes.length).toBe(GRASS_BEHIND + GRASS_TIERS.high.ahead + 1);
     for (const m of meshes) expect(m.count).toBe(GRASS_TIERS.high.clusters);
@@ -350,16 +361,16 @@ describe('GrassField placement', () => {
     const builds = vi.spyOn(field, 'build');
 
     // Same car, same quality: nothing to do at all.
-    for (let f = 0; f < 5; f++) cm.update(600);
+    for (let f = 0; f < 5; f++) frame(cm, 600);
     expect(builds).not.toHaveBeenCalled();
 
     // A quality change rebuilds each band chunk exactly once, not once a frame.
     field.setQuality('high');
-    cm.update(600);
+    frame(cm, 600);
     // The four chunks the low band held, plus the one the wider high band adds.
     expect(builds).toHaveBeenCalledTimes(GRASS_BEHIND + GRASS_TIERS.high.ahead + 1);
     builds.mockClear();
-    for (let f = 0; f < 5; f++) cm.update(600);
+    for (let f = 0; f < 5; f++) frame(cm, 600);
     expect(builds).not.toHaveBeenCalled();
 
     builds.mockRestore();
@@ -390,7 +401,7 @@ describe('GrassField placement', () => {
     leaving.geometry.addEventListener('dispose', () => {
       disposed = true;
     });
-    for (let i = 1; i <= 4; i++) cm.update(600 + i * CHUNK_LEN);
+    for (let i = 1; i <= 4; i++) frame(cm, 600 + i * CHUNK_LEN);
     expect(disposed).toBe(true);
     expect(leaving.parent).toBe(null);
   });
@@ -461,7 +472,7 @@ describe('GrassField grounding', () => {
     const path = new RoadPath(SEED);
     const cm = new ChunkManager(path, new THREE.Scene(), new GrassField('low'));
     const carS = 600;
-    cm.update(carS);
+    frame(cm, carS);
     const meshes = grassMeshes(cm);
     expect(meshes.length).toBeGreaterThan(0);
 
@@ -500,7 +511,7 @@ describe('GrassField grounding', () => {
   it('keeps clusters off the road and inside the lateral cap', () => {
     const path = new RoadPath(SEED);
     const cm = new ChunkManager(path, new THREE.Scene(), new GrassField('low'));
-    cm.update(600);
+    frame(cm, 600);
     const m = new THREE.Matrix4();
     const pos = new THREE.Vector3();
     const quat = new THREE.Quaternion();

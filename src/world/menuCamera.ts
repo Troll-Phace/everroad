@@ -196,8 +196,8 @@ export const MENU_MAX_LEAD = 260;
  *
  * 1320 m is `AHEAD * CHUNK_LEN`, and that is not a coincidence worth losing:
  * the ribbon's forward cut is hidden at exactly the same distance, by the same
- * haze, met by the same `FAR_LAND_HAZE_SCALE` backdrop. One number covers both
- * ends of the world.
+ * haze, met by the same `farLand.ts` backdrop. One number covers both ends of
+ * the world.
  */
 export const MENU_SAFE_DISTANCE = 1320;
 
