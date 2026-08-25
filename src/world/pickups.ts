@@ -24,8 +24,14 @@ export interface PickupDeps {
 const COIN_CAP = 160;
 /** Relic gem radius in meters — one shared geometry serves every spawn. */
 const RELIC_RADIUS = 0.5;
-/** Near-miss dedupe entries tolerated before dead chunks are pruned out. */
-const CONSUMED_PRUNE_AT = 400;
+/**
+ * Near-miss dedupe entries tolerated before dead chunks are pruned out.
+ *
+ * Exported so `pickups.test.ts` can size its prune case from the real number.
+ * Hard-coding a count over this in the test would keep passing if the constant
+ * were ever raised past it, while silently no longer reaching the prune at all.
+ */
+export const CONSUMED_PRUNE_AT = 400;
 
 interface Coin {
   s: number;
@@ -167,6 +173,7 @@ export class Pickups {
 
     // ---- near-misses ----
     if (active && vehicle.speedMps > 9) {
+      let awarded = 0;
       for (const ob of this.chunks.obstaclesNear(carS, 6)) {
         if (this.consumedObstacles.has(ob.key)) continue;
         if (Math.abs(ob.s - carS) > 1.6) continue;
@@ -175,9 +182,26 @@ export class Pickups {
           this.consumedObstacles.set(ob.key, Math.floor(ob.s / CHUNK_LEN));
           this.gainCombo(0.4);
           this.deps.onNearMiss();
-          this.bus.emit('nearMiss', { comboNow: this.combo });
+          awarded++;
         }
       }
+      // One event per frame, however many obstacles the pass cleared.
+      //
+      // Scoring stays per obstacle: threading a gap between three clumped
+      // rocks is a harder line than passing one, and `stats.nearMisses` is
+      // literally a count of obstacles missed, so both stay inside the loop.
+      // The *event* is different — its only consumer is a one-shot whoosh, and
+      // three of those started at the same `AudioContext` time sweep the same
+      // 450->3000 Hz band over the same 0.22 s. They do not read as three
+      // events; they sum to roughly three times the intended gain and read as
+      // one loud, phasey one. Seeded clumping made this routine (measured at
+      // 8.3% of award moments, against 4.5% before clumps), which is what
+      // turned a long-standing rough edge into an audible one.
+      //
+      // `comboNow` is therefore the combo after every gain in this frame,
+      // which is the honest figure — the old per-obstacle emits reported
+      // intermediate values that no consumer could use.
+      if (awarded > 0) this.bus.emit('nearMiss', { comboNow: this.combo });
       if (this.consumedObstacles.size > CONSUMED_PRUNE_AT) this.pruneConsumed();
     }
   }

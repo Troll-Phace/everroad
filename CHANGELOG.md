@@ -41,6 +41,9 @@ the generated module.
   standing about one at a time, flowers gather in drifts and carry much further
   out into the fields, and there are a lot more of both.
 
+- The road signs got repainted: the game is **EverRoad**, with a capital R,
+  everywhere it names itself.
+
 ### Fixed
 
 - **The world no longer runs out behind you on the title screen.** The menu's
@@ -50,10 +53,12 @@ the generated module.
   keeps going far enough behind the car that the end of it stays out in the
   haze where it belongs.
 
-### Changed
-
-- The road signs got repainted: the game is **EverRoad**, with a capital R,
-  everywhere it names itself.
+- **One whoosh per near miss.** Squeezing past a cluster of roadside rocks or
+  fence posts used to fire the near-miss sound once per obstacle, all on the
+  same instant — which did not sound like three near misses, it sounded like
+  one very loud one. You now get a single whoosh per pass. What you earn for it
+  is unchanged: every obstacle you thread still pays its own combo, and still
+  counts toward your near-miss tally.
 
 ## [0.1.20] - 2026-08-24
 
