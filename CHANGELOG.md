@@ -32,6 +32,13 @@ the generated module.
   across the middle where the countryside started again. The ground cover now
   follows the camera as well as the car, so wherever a shot stands, it stands
   in grass.
+- **Hillsides have stopped hanging in the sky.** In the title-screen footage,
+  where the road loops back on itself, a band of far countryside — trees,
+  fences, sometimes a stretch of the road itself — could appear floating above
+  the horizon with a hard straight edge and pale haze underneath it. That was
+  the land across the valley showing you its unfinished underside. Every
+  stretch of ground now runs all the way down to meet the earth, so the far
+  side of a bend reads as a hillside instead of an island in the air.
 
 ## [0.1.21] - 2026-08-25
 
