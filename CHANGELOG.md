@@ -15,6 +15,8 @@ the generated module.
 
 ## [Unreleased]
 
+## [0.1.21] - 2026-08-25
+
 ### Added
 
 - **The countryside grew a floor.** The verges either side of the road used to
@@ -303,4 +305,5 @@ the generated module.
 - A generative audio engine, the HUD and panel overlay, and a save system that
   keeps earning while you are away.
 
-[Unreleased]: https://github.com/Troll-Phace/everroad/compare/v0.1.20...HEAD
+[Unreleased]: https://github.com/Troll-Phace/everroad/compare/v0.1.21...HEAD
+[0.1.21]: https://github.com/Troll-Phace/everroad/compare/v0.1.20...v0.1.21

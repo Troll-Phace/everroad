@@ -5,7 +5,7 @@
  * truth for patch notes. Edit that file and regenerate; `npm run verify` and
  * CI both fail when the two drift apart.
  *
- * 21 release(s), 51 note(s), newest 0.1.20 (2026-08-24).
+ * 22 release(s), 57 note(s), newest 0.1.21 (2026-08-25).
  */
 
 /** One `### ` block of a release: "Added", "Changed", "Fixed", and friends. */
@@ -24,6 +24,33 @@ export interface ChangelogRelease {
 
 /** Newest first. Excludes the [Unreleased] section. */
 export const CHANGELOG: readonly ChangelogRelease[] = [
+  {
+    version: '0.1.21',
+    date: '2026-08-25',
+    sections: [
+      {
+        heading: 'Added',
+        items: [
+          "**The countryside grew a floor.** The verges either side of the road used to be a flat sheet of green; they are now thick with grass — thousands of tufts a stretch, dense at the shoulder and thinning out into the fields — and it moves. Slow sways with gusts travelling across the field on top of them, calm on a clear day and thrashing in the rain. It follows whichever biome you are in, so the meadow's grass and the marsh's grass are not the same green. Turn the graphics quality down if your machine would rather have the frames.",
+        ],
+      },
+      {
+        heading: 'Changed',
+        items: [
+          '**You can see where you are going.** Distant country used to disappear into a flat white haze a couple of hundred metres out — worst in Emberwood, where a milky band sat right across those orange canopies. The air has been thinned out and given its colour back: fields, hedgerows and treelines now keep their own colour most of a kilometre down the road, and what finally takes them is a soft blue distance with ridges standing in it, the way real far-off land goes. Sunsets keep their warmth in the haze instead of being bleached out of it. Mistpine and Dawnmarsh are still the hazy ones, and a fog bank still closes the world down to the next bend.',
+          '**Fuller countryside.** Trees now grow in groves and clearings instead of standing about one at a time, flowers gather in drifts and carry much further out into the fields, and there are a lot more of both.',
+          'The road signs got repainted: the game is **EverRoad**, with a capital R, everywhere it names itself.',
+        ],
+      },
+      {
+        heading: 'Fixed',
+        items: [
+          "**The world no longer runs out behind you on the title screen.** The menu's camera likes to stand down the road and look back at the car, and from there you could see the countryside stop dead — a stepped cliff a couple of hundred metres back, with fenceposts and hay bales stranded on its lip. The road now keeps going far enough behind the car that the end of it stays out in the haze where it belongs.",
+          '**One whoosh per near miss.** Squeezing past a cluster of roadside rocks or fence posts used to fire the near-miss sound once per obstacle, all on the same instant — which did not sound like three near misses, it sounded like one very loud one. You now get a single whoosh per pass. What you earn for it is unchanged: every obstacle you thread still pays its own combo, and still counts toward your near-miss tally.',
+        ],
+      },
+    ],
+  },
   {
     version: '0.1.20',
     date: '2026-08-24',
