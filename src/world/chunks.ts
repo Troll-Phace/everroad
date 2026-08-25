@@ -208,6 +208,82 @@ export const TER_COLS = [
  */
 export const TER_ROW_STEP = 6;
 
+/**
+ * Metres each terrain-skirt vertex drops straight down from the boundary
+ * vertex it hangs under.
+ *
+ * The skirt exists because the ribbon is swept in path space and simply ends
+ * at its mesh boundaries — laterally at ±165 m (`TER_COLS`) and at the band's
+ * two s-ends — while `RoadPath` doubles back on itself constantly: over 60 km
+ * of the shipping seed there are ~406k sample pairs more than 800 m apart
+ * along the arc but under 600 m apart in a straight line. Seen across such a
+ * gap, an open cut edge (elevated by road-elevation drift plus `landHeight`'s
+ * far-field rise) hangs in the air with sky or backdrop haze beneath it — the
+ * attract-mode "floating terrain" band (issue #88, docs/ARCHITECTURE.md §5.3).
+ *
+ * The drop is sized so the skirt bottom lands below the ground under any
+ * menu-legal eye, so no sky or backdrop can show directly beneath a terrain
+ * edge. Three components, summed:
+ *
+ * - Road-elevation gain between euclid-visible gap pairs (arc > 250 m,
+ *   euclid < 1000 m): measured at 125.3 m over a 200 km sweep of the shipping
+ *   seed, and bounded analytically by the slope closed form —
+ *   2 * sum(amp / freq) = 2 * (0.028/0.0021 + 0.035/0.00072 + 0.008/0.0058)
+ *   ~ 126.6 m.
+ * - `landHeight`'s maximum relief above its own road (bounded ~36 m: hills
+ *   ±23 x 0.55 plus a far-field rise of up to 24; measured 33.4 m).
+ * - The viewer's own ground dipping below their road (measured 14.8 m).
+ *
+ * Plus margin. The skirt-sizing test in `chunks.test.ts` re-measures all three
+ * empirically, so retuning the road's slope or the land relief forces this
+ * constant to follow.
+ */
+export const TER_SKIRT_DROP = 180;
+
+/**
+ * Drops, in metres below the boundary vertex, of each skirt level — level 0 is
+ * the duplicated boundary top, the last level carries the `TER_SKIRT_DROP`
+ * closure guarantee unchanged.
+ *
+ * More than two levels exist because a wall drawn as one 180 m quad reads as a
+ * giant featureless cliff: vertex colours and toon shading interpolate over
+ * the full 180 m, so the ~40 m strip actually visible above a far lobe's
+ * horizon shows essentially uniform colour, and no tint or normal trick can
+ * paint detail where there are no vertices (verified live — see issue #88).
+ * The resolution is deliberately concentrated near the top, where the wall is
+ * seen; the deep levels only exist to reach the closure depth.
+ */
+export const TER_SKIRT_LEVELS = [0, 6, 16, 36, 80, TER_SKIRT_DROP];
+
+/**
+ * Horizontal outward push, in metres, of each skirt level, so the top edge
+ * rounds over into a shoulder instead of reading as a knife line against the
+ * sky. Aligned with `TER_SKIRT_LEVELS`.
+ *
+ * The 10 m maximum is safe against self-intersection twice over: doubled-back
+ * road lobes already interpenetrate (measured centreline pairs approach ~1 m
+ * apart on the shipping seed), so a 10 m flare adds no new overlap class, and
+ * on the inside of the tightest bend the fold-limited edge sits at 0.85 x
+ * 87.7 = 74.5 m from the road centreline, 13.2 m short of the fold point at
+ * the 87.7 m disc centre — 10 m of push still leaves 3.2 m, so no wall band
+ * can invert.
+ */
+export const TER_SKIRT_BEVEL = [0, 4, 7, 9, 10, 10];
+
+/**
+ * Per-level multiplier on the boundary vertex's own colour, darkening the wall
+ * with depth so it reads as ground falling into shadow rather than a lit
+ * cliff. Aligned with `TER_SKIRT_LEVELS`; level 0's ramp stays at 1, so the
+ * wall top meets the surface within the wobble alone (the wobble applies at
+ * every level, so the crest can differ from its source tone by up to +-7% —
+ * the same amplitude as the surface's own patchwork, so the join reads as
+ * more patchwork). On top of this ramp each skirt vertex
+ * carries the terrain's usual +-7% noise wobble (see `buildTerrain`), keyed on
+ * world position and drop so the patchwork is seamless across wall joins and
+ * chunk seams.
+ */
+export const TER_SKIRT_SHADE = [1, 0.95, 0.88, 0.8, 0.7, 0.62];
+
 /** Floats `terrainRow` writes per column: world x, y, z, then effective lat. */
 export const TERRAIN_ROW_STRIDE = 4;
 
@@ -794,8 +870,13 @@ export class ChunkManager {
   private buildTerrain(s0: number, s1: number, anchor: THREE.Vector3): THREE.Mesh {
     const rows = Math.round((s1 - s0) / TER_ROW_STEP) + 1;
     const cols = TER_COLS.length;
-    const pos = new Float32Array(rows * cols * 3);
-    const col = new Float32Array(rows * cols * 3);
+    const surf = rows * cols;
+    // Perimeter skirt: closes the ribbon's open cut edges against the
+    // doubled-back-road sightlines of issue #88 (docs/ARCHITECTURE.md §5.3).
+    // The surface occupies the buffer prefix exactly as it did without it.
+    const skirt = cachedTerrainSkirt(rows, cols);
+    const pos = new Float32Array((surf + skirt.src.length) * 3);
+    const col = new Float32Array((surf + skirt.src.length) * 3);
     const ground = new THREE.Color();
     const groundAlt = new THREE.Color();
     const mixed = new THREE.Color();
@@ -830,11 +911,55 @@ export class ChunkManager {
       }
     }
 
+    // Skirt vertices: duplicate each boundary vertex (never share it — see
+    // `terrainSkirt`), then place each level down by its drop and out by its
+    // bevel along the vertex's one shared outward direction (watertight at
+    // corners by construction). Colour is the boundary vertex's own tone
+    // through the depth ramp, plus the surface's usual noise wobble — keyed on
+    // world position and drop so the patchwork is seamless across wall joins
+    // and chunk seams, and baked like all terrain colour.
+    const outward = { x: 0, z: 0 };
+    for (let i = 0; i < skirt.src.length; i++) {
+      const a = skirt.src[i] * 3;
+      const b = (surf + i) * 3;
+      const l = skirt.level[i];
+      perimeterOutward(pos, rows, cols, skirt.src[i], outward);
+      pos[b] = pos[a] + outward.x * TER_SKIRT_BEVEL[l];
+      pos[b + 1] = pos[a + 1] - TER_SKIRT_LEVELS[l];
+      pos[b + 2] = pos[a + 2] + outward.z * TER_SKIRT_BEVEL[l];
+      const wobble =
+        1 +
+        noise2(
+          (pos[b] + anchor.x) * 0.02,
+          (pos[b + 2] + anchor.z) * 0.02 + TER_SKIRT_LEVELS[l] * 0.13,
+        ) *
+          0.07;
+      const shade = TER_SKIRT_SHADE[l] * wobble;
+      col[b] = col[a] * shade;
+      col[b + 1] = col[a + 1] * shade;
+      col[b + 2] = col[a + 2] * shade;
+    }
+
     const geo = new THREE.BufferGeometry();
     geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
     geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-    geo.setIndex(gridIndices(rows, cols));
+    const grid = gridIndices(rows, cols);
+    const idx = new Uint32Array(grid.count + skirt.indices.length);
+    idx.set(grid.array as Uint32Array);
+    idx.set(skirt.indices, grid.count);
+    geo.setIndex(new THREE.BufferAttribute(idx, 1));
     geo.computeVertexNormals();
+    // Overwrite every skirt normal with its surface source's, so the walls
+    // shade exactly like the ground they hang from — no dark cliff faces at
+    // glancing sun angles (`farLand.ts` leans normals up for the same reason).
+    const nrm = geo.getAttribute('normal').array as Float32Array;
+    for (let i = 0; i < skirt.src.length; i++) {
+      const a = skirt.src[i] * 3;
+      const b = (surf + i) * 3;
+      nrm[b] = nrm[a];
+      nrm[b + 1] = nrm[a + 1];
+      nrm[b + 2] = nrm[a + 2];
+    }
     const mesh = new THREE.Mesh(geo, this.mat);
     mesh.receiveShadow = true;
     return mesh;
@@ -1141,6 +1266,158 @@ function pickTint(s: number, kind: SceneryKind, r: () => number, out: THREE.Colo
 }
 
 const tmpColor = new THREE.Color();
+
+/**
+ * Topology of the perimeter skirt one terrain grid hangs below itself:
+ * which surface vertex each appended skirt vertex copies, whether it is a
+ * dropped bottom, and the wall triangles over the combined buffer.
+ *
+ * Pure grid arithmetic — positions never enter — so `buildTerrain` computes it
+ * once per grid shape (see `cachedTerrainSkirt`) and the contract is testable
+ * without a scene (docs/ARCHITECTURE.md §5.3).
+ */
+export interface TerrainSkirt {
+  /**
+   * Surface vertex index each skirt vertex hangs from. Skirt vertex `i` lives
+   * at buffer index `rows * cols + i`, derives its position, colour and — after
+   * `computeVertexNormals` — its normal from its source, so the walls shade
+   * like the ground above them.
+   */
+  src: Uint32Array;
+  /**
+   * Index into `TER_SKIRT_LEVELS` / `TER_SKIRT_BEVEL` / `TER_SKIRT_SHADE` for
+   * each skirt vertex: 0 is the duplicated boundary top, the last level hangs
+   * `TER_SKIRT_DROP` below it.
+   */
+  level: Uint8Array;
+  /** Wall triangles, indexed over the combined surface-then-skirt buffer. */
+  indices: Uint32Array;
+}
+
+/**
+ * Build the skirt for a `rows` x `cols` terrain grid: a wall hanging from the
+ * grid's entire perimeter — both lateral edge columns and both end rows — so a
+ * cut edge seen across a doubled-back gap shows ground under it instead of
+ * sky (issue #88, docs/ARCHITECTURE.md §5.3).
+ *
+ * Each wall is a stack of `TER_SKIRT_LEVELS` rings rather than one tall quad:
+ * one quad from top to bottom interpolates its colours over the full 180 m, so
+ * the strip actually visible above a far lobe's horizon reads as a single
+ * featureless tone. The levels give the wall the vertical resolution to carry
+ * the depth ramp and patchwork `buildTerrain` paints on it, and the bevel
+ * (`TER_SKIRT_BEVEL`) rounds the top edge over into a shoulder.
+ *
+ * Boundary tops are duplicated rather than shared with the surface grid:
+ * sharing would let `computeVertexNormals` tilt the boundary-row surface
+ * normals outward, and at internal chunk seams — where the wall hangs buried
+ * under the neighbour's continuous ground — that would stamp a toon-band
+ * shading line across every 60 m boundary.
+ *
+ * The walls wind to face *outward* (the material is front-side only), so
+ * backface culling hides every wall from inside the ribbon and the near-field
+ * look is untouched by construction. Both walls at each grid corner carry the
+ * corner at every level, and `perimeterOutward` gives the corner one shared
+ * bevel direction, so the perimeter closes watertight.
+ */
+export function terrainSkirt(rows: number, cols: number): TerrainSkirt {
+  const surf = rows * cols;
+  const L = TER_SKIRT_LEVELS.length;
+  const src = new Uint32Array(L * 2 * (rows + cols));
+  const level = new Uint8Array(src.length);
+  const indices = new Uint32Array(6 * (L - 1) * (2 * (rows - 1) + 2 * (cols - 1)));
+  let v = 0;
+  let k = 0;
+
+  // One wall: the boundary run duplicated once per level, then the quads
+  // between consecutive levels. The surface grid winds its faces upward, which
+  // fixes the frame — lateral x row-step = up — and the two wall windings
+  // follow from it: with the upper ring advancing along the run, (upper,
+  // next-upper, lower) faces one way and `flip` swaps to the other. Which wall
+  // takes which is pinned by the outward-facing test in chunks.test.ts.
+  const wall = (n: number, at: (i: number) => number, flip: boolean): void => {
+    const base = v;
+    for (let l = 0; l < L; l++) {
+      for (let i = 0; i < n; i++) {
+        src[v] = at(i);
+        level[v++] = l;
+      }
+    }
+    for (let l = 0; l < L - 1; l++) {
+      for (let i = 0; i < n - 1; i++) {
+        const t0 = surf + base + l * n + i;
+        const t1 = t0 + 1;
+        const b0 = t0 + n;
+        const b1 = b0 + 1;
+        indices[k++] = t0;
+        indices[k++] = flip ? b0 : t1;
+        indices[k++] = flip ? t1 : b0;
+        indices[k++] = t1;
+        indices[k++] = flip ? b0 : b1;
+        indices[k++] = flip ? b1 : b0;
+      }
+    }
+  };
+
+  wall(rows, (r) => r * cols, false); // lat TER_COLS[0] edge, faces -lat
+  wall(rows, (r) => r * cols + cols - 1, true); // lat TER_COLS[last] edge, faces +lat
+  wall(cols, (j) => j, true); // first row, faces backward along the road
+  wall(cols, (j) => (rows - 1) * cols + j, false); // last row, faces forward
+  return { src, level, indices };
+}
+
+/**
+ * Unit outward XZ direction of one perimeter vertex of the surface grid,
+ * derived from the grid's own drawn positions: for an edge vertex, from its
+ * inner neighbour toward it (y ignored); at a grid corner, the normalized sum
+ * of its two edge directions.
+ *
+ * The corner rule is what keeps the bevelled skirt watertight: the two walls
+ * meeting at a corner both consume this one direction, so they push the
+ * shared corner to *identical* positions at every level rather than each
+ * flaring along its own edge and tearing the seam open.
+ *
+ * `pos` is the surface vertex buffer (anchor-relative is fine — only
+ * differences enter). Writes into `out` and allocates nothing.
+ */
+export function perimeterOutward(
+  pos: Float32Array,
+  rows: number,
+  cols: number,
+  srcIdx: number,
+  out: { x: number; z: number },
+): { x: number; z: number } {
+  const r = Math.floor(srcIdx / cols);
+  const j = srcIdx % cols;
+  let x = 0;
+  let z = 0;
+  const add = (inner: number): void => {
+    const dx = pos[srcIdx * 3] - pos[inner * 3];
+    const dz = pos[srcIdx * 3 + 2] - pos[inner * 3 + 2];
+    const len = Math.hypot(dx, dz);
+    if (len > 0) {
+      x += dx / len;
+      z += dz / len;
+    }
+  };
+  if (j === 0) add(srcIdx + 1);
+  if (j === cols - 1) add(srcIdx - 1);
+  if (r === 0) add(srcIdx + cols);
+  if (r === rows - 1) add(srcIdx - cols);
+  const len = Math.hypot(x, z);
+  out.x = len > 0 ? x / len : 0;
+  out.z = len > 0 ? z / len : 0;
+  return out;
+}
+
+/** `terrainSkirt` memoized on grid shape — every chunk shares one topology. */
+let skirtCache: { rows: number; cols: number; skirt: TerrainSkirt } | null = null;
+
+function cachedTerrainSkirt(rows: number, cols: number): TerrainSkirt {
+  if (!skirtCache || skirtCache.rows !== rows || skirtCache.cols !== cols) {
+    skirtCache = { rows, cols, skirt: terrainSkirt(rows, cols) };
+  }
+  return skirtCache.skirt;
+}
 
 function gridIndices(rows: number, cols: number): THREE.BufferAttribute {
   const idx = new Uint32Array((rows - 1) * (cols - 1) * 6);

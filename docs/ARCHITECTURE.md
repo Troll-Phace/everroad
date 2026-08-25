@@ -691,6 +691,48 @@ the effect is never built and a fan ordered after the disc erases it through
 the whole golden hour. That asymmetry between quality tiers is exactly the
 kind of bug a mid-quality playtest cannot see.
 
+The cut edges themselves are closed by a **perimeter skirt** on each chunk's
+terrain mesh: a wall hanging from the grid's entire boundary — both ±165 m
+edge columns and both end rows. It exists because the ribbon is swept in path
+space while the road doubles back constantly, so an open cut edge many chunks
+away along the arc is routinely a few hundred metres from the eye in a
+straight line, barely hazed, and elevated by road-elevation drift plus the
+far-field rise — the attract-mode "floating terrain" band of issue #88, and
+the same mechanism at the rear cut this section measures at 244–558 m. The
+walls duplicate their boundary vertices (sharing them would tilt the surface
+normals and stamp a toon band across every internal 60 m seam, where the wall
+hangs buried under the neighbour chunk's continuous ground), keep the source
+vertex's computed surface normal at every depth (true outward normals buy
+nothing at midday and risk dark cliff faces at other sun angles — measured
+live), and wind to face *outward* — the terrain material is front-side only,
+so backface culling hides every wall from inside the ribbon and the
+near-field look is untouched by construction.
+
+Each wall is a stack of rings, not one tall quad: `TER_SKIRT_LEVELS` drops at
+0/6/16/36/80/180 m, resolution deliberately concentrated near the top where
+the wall is actually seen. A single 180 m quad interpolates its vertex
+colours over the full drop, so the ~40 m strip visible above a far lobe's
+horizon rendered as a giant featureless cliff — the levels give the wall
+paint: per level the boundary tone runs through the `TER_SKIRT_SHADE` depth
+ramp (1 → 0.62) with the terrain's usual ±7% noise wobble, keyed on world
+position and drop so the patchwork is baked and seamless across wall joins
+and chunk seams. `TER_SKIRT_BEVEL` pushes the rings outward 0 → 10 m so the
+top edge rounds over into a shoulder instead of a knife line; each perimeter
+vertex owns a single outward direction (at grid corners, the normalized sum
+of its two edge directions) consumed by both adjacent walls, which keeps the
+bevelled corners watertight at every level. The 10 m flare is fold-safe — at
+the tightest bend the edge sits at 0.85 × 87.7 = 74.5 m from the road
+centreline, 13.2 m short of the fold point at the 87.7 m disc centre, so
+10 m of push leaves 3.2 m — and adds no new overlap class, since doubled-back
+lobes already interpenetrate.
+
+`TER_SKIRT_DROP` = 180 m carries the guarantee: the wall bottom lands below
+the ground under any menu-legal eye, sized as the sum of the road-elevation
+drift across euclid-visible gaps (measured 125.3 m, analytic bound 126.6 m),
+the land's relief above its own road (33.4 m) and the viewer's ground dipping
+below theirs (14.8 m), plus margin — all three re-measured by the skirt tests
+in `chunks.test.ts`, so a slope or relief retune drags the constant with it.
+
 It stands on the **ground under the camera**, not on the eye, and its profile is
 a height field in metres above that ground rather than a set of elevation angles
 from the lens. `FarLand.update` samples `terrainMeshHeight` at the camera's own

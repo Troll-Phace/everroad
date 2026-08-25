@@ -11,19 +11,26 @@ import {
   SLOPE_FOLLOW,
   TER_COLS,
   TER_ROW_STEP,
+  TER_SKIRT_BEVEL,
+  TER_SKIRT_DROP,
+  TER_SKIRT_LEVELS,
+  TER_SKIRT_SHADE,
   TERRAIN_ROW_STRIDE,
   coverBand,
   createTerrainSample,
   groundProp,
+  perimeterOutward,
   terrainRow,
   propOrientation,
   sampleTerrainMesh,
   terrainHeight,
   terrainMeshHeight,
+  terrainSkirt,
   type CoverBand,
   type CoverEye,
 } from './chunks';
 import { GRASS_TIERS, GrassField } from './grass';
+import { noise2 } from './materials';
 import {
   MENU_MAX_LEAD,
   MENU_SHOTS,
@@ -478,10 +485,12 @@ describe('sampleTerrainMesh vs. the rendered geometry', () => {
   /** The chunk's terrain mesh and the world offset its vertices are stored against. */
   function terrainOf(cm: ChunkManager, index: number): { mesh: THREE.Mesh; origin: THREE.Vector3 } {
     const group = cm.root.children[index] as THREE.Group;
-    // Road and terrain are both indexed grids; only terrain is TER_COLS wide.
+    // Road and terrain are both indexed grids; only terrain is TER_COLS wide
+    // (surface grid plus the perimeter skirt hanging from it).
+    const wanted = TER_ROWS * TER_COLS.length + terrainSkirt(TER_ROWS, TER_COLS.length).src.length;
     const mesh = group.children.find((c) => {
       const g = (c as THREE.Mesh).geometry;
-      return !!g && !!g.index && g.attributes.position.count === TER_ROWS * TER_COLS.length;
+      return !!g && !!g.index && g.attributes.position.count === wanted;
     }) as THREE.Mesh | undefined;
     expect(mesh, 'chunk has a terrain mesh').toBeDefined();
     return { mesh: mesh as THREE.Mesh, origin: group.position };
@@ -688,8 +697,9 @@ describe('terrainRow', () => {
     const index = 10;
     const group = cm.root.children[index - (600 / CHUNK_LEN - PLAY_BEHIND)] as THREE.Group;
     // Road and terrain are both indexed grids; the terrain is the one with a
-    // TER_COLS-wide row.
-    const wanted = (CHUNK_LEN / TER_ROW_STEP + 1) * TER_COLS.length;
+    // TER_COLS-wide row (plus the perimeter skirt appended after the surface).
+    const rows = CHUNK_LEN / TER_ROW_STEP + 1;
+    const wanted = rows * TER_COLS.length + terrainSkirt(rows, TER_COLS.length).src.length;
     const terrain = group.children.find(
       (c) => (c as THREE.Mesh).geometry?.attributes.position.count === wanted,
     ) as THREE.Mesh;
@@ -1101,6 +1111,383 @@ describe('the cover pass belongs after the camera', () => {
     expect(ribbon).toBeGreaterThan(0);
     expect(camera).toBeGreaterThan(ribbon);
     expect(cover).toBeGreaterThan(camera);
+  });
+});
+
+/**
+ * The perimeter skirt (issue #88, docs/ARCHITECTURE.md §5.3). The terrain
+ * ribbon is swept in path space and simply ends at its mesh boundaries; seen
+ * across a gap where the road doubles back, the open cut edge hung in the air
+ * with sky or backdrop haze beneath it. Each chunk now hangs a vertical wall
+ * from its grid's entire perimeter, deep enough that the wall bottom lands
+ * below the ground under any menu-legal eye.
+ */
+describe('terrainSkirt', () => {
+  const ROWS = CHUNK_LEN / TER_ROW_STEP + 1;
+  const COLS = TER_COLS.length;
+  const SURF = ROWS * COLS;
+  const GRID_IDX = (ROWS - 1) * (COLS - 1) * 6;
+
+  /** One built chunk's terrain mesh — the geometry the renderer draws. */
+  function builtTerrain(): { mesh: THREE.Mesh; origin: THREE.Vector3 } {
+    const cm = new ChunkManager(new RoadPath(20260824), new THREE.Scene());
+    cm.update(0);
+    const group = cm.root.children[3] as THREE.Group;
+    const wanted = SURF + terrainSkirt(ROWS, COLS).src.length;
+    const mesh = group.children.find(
+      (c) => (c as THREE.Mesh).geometry?.attributes.position.count === wanted,
+    ) as THREE.Mesh;
+    expect(mesh, 'chunk has a skirted terrain mesh').toBeDefined();
+    return { mesh, origin: group.position };
+  }
+
+  it('aligns the level tables and keeps the closure depth and bevel bounds', () => {
+    // One entry per level in every table, the top level flush with the
+    // surface, and the bottom level exactly at the closure depth — so the
+    // TER_SKIRT_DROP guarantee is untouched by the levelling.
+    expect(TER_SKIRT_BEVEL.length).toBe(TER_SKIRT_LEVELS.length);
+    expect(TER_SKIRT_SHADE.length).toBe(TER_SKIRT_LEVELS.length);
+    expect(TER_SKIRT_LEVELS[0]).toBe(0);
+    expect(TER_SKIRT_LEVELS[TER_SKIRT_LEVELS.length - 1]).toBe(TER_SKIRT_DROP);
+    for (let l = 1; l < TER_SKIRT_LEVELS.length; l++) {
+      expect(TER_SKIRT_LEVELS[l]).toBeGreaterThan(TER_SKIRT_LEVELS[l - 1]);
+      // The shade ramp only ever darkens with depth.
+      expect(TER_SKIRT_SHADE[l]).toBeLessThanOrEqual(TER_SKIRT_SHADE[l - 1]);
+    }
+    // The flare stays inside the fold-safe budget: at the tightest bend the
+    // edge sits 0.85 x 87.7 = 74.5 m from the road centreline, 13.2 m short
+    // of the fold point at the 87.7 m disc centre, so 10 m of push cannot
+    // reach it and no wall band can invert.
+    expect(TER_SKIRT_BEVEL[0]).toBe(0);
+    expect(Math.max(...TER_SKIRT_BEVEL)).toBeLessThanOrEqual(10);
+    expect(TER_SKIRT_SHADE[0]).toBe(1);
+  });
+
+  it('covers the whole perimeter with one full level stack per wall membership', () => {
+    const skirt = terrainSkirt(ROWS, COLS);
+    const L = TER_SKIRT_LEVELS.length;
+    expect(skirt.src.length).toBe(L * 2 * (ROWS + COLS));
+    expect(skirt.level.length).toBe(skirt.src.length);
+    // Count skirt vertices per (surface vertex, level).
+    const seen = new Map<number, number>();
+    for (let i = 0; i < skirt.src.length; i++) {
+      const key = skirt.src[i] * L + skirt.level[i];
+      seen.set(key, (seen.get(key) ?? 0) + 1);
+    }
+    for (let r = 0; r < ROWS; r++) {
+      for (let j = 0; j < COLS; j++) {
+        const v = r * COLS + j;
+        const edges =
+          Number(r === 0) + Number(r === ROWS - 1) + Number(j === 0) + Number(j === COLS - 1);
+        for (let l = 0; l < L; l++) {
+          // Interior vertices get no skirt; edge vertices one wall's worth
+          // per level; corners sit in both adjacent walls at every level,
+          // which is what lets the perimeter close watertight.
+          expect(seen.get(v * L + l) ?? 0, `r=${r} j=${j} level=${l}`).toBe(edges);
+        }
+      }
+    }
+  });
+
+  it('indexes the walls strictly after an untouched surface grid', () => {
+    const skirt = terrainSkirt(ROWS, COLS);
+    // Every wall triangle references only appended vertices, so no skirt
+    // face can perturb `computeVertexNormals` on the surface grid.
+    for (const i of skirt.indices) {
+      expect(i).toBeGreaterThanOrEqual(SURF);
+      expect(i).toBeLessThan(SURF + skirt.src.length);
+    }
+    const { mesh } = builtTerrain();
+    const idx = mesh.geometry.index as THREE.BufferAttribute;
+    // The built buffer is the surface grid's indices followed by the walls.
+    expect(idx.count).toBe(GRID_IDX + skirt.indices.length);
+    for (let t = 0; t < GRID_IDX; t++) expect(idx.getX(t)).toBeLessThan(SURF);
+    for (let t = 0; t < skirt.indices.length; t++) {
+      expect(idx.getX(GRID_IDX + t)).toBe(skirt.indices[t]);
+    }
+  });
+
+  it('drops each level by its depth and bevels it outward by its push', () => {
+    const skirt = terrainSkirt(ROWS, COLS);
+    const { mesh } = builtTerrain();
+    const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
+    const posArr = pos.array as Float32Array;
+    const out = { x: 0, z: 0 };
+    for (let i = 0; i < skirt.src.length; i++) {
+      const a = skirt.src[i];
+      const b = SURF + i;
+      const l = skirt.level[i];
+      // Straight down by the level's drop — the bottom level lands exactly
+      // TER_SKIRT_DROP under the boundary, so the closure guarantee holds.
+      expect(pos.getY(b)).toBeCloseTo(pos.getY(a) - TER_SKIRT_LEVELS[l], 3);
+      // And out by the level's bevel, along the vertex's one shared outward
+      // direction (never more than the 10 m fold-safe budget).
+      const dx = pos.getX(b) - pos.getX(a);
+      const dz = pos.getZ(b) - pos.getZ(a);
+      const push = Math.hypot(dx, dz);
+      expect(push).toBeCloseTo(TER_SKIRT_BEVEL[l], 3);
+      // Float32 vertex storage rounds the push by a few micrometres.
+      expect(push).toBeLessThanOrEqual(10 + 1e-3);
+      if (TER_SKIRT_BEVEL[l] > 0) {
+        perimeterOutward(posArr, ROWS, COLS, a, out);
+        expect(dx / push).toBeCloseTo(out.x, 4);
+        expect(dz / push).toBeCloseTo(out.z, 4);
+      }
+    }
+  });
+
+  it('meets watertight at every level where two walls share a corner', () => {
+    const skirt = terrainSkirt(ROWS, COLS);
+    const { mesh } = builtTerrain();
+    const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
+    const corners = [0, COLS - 1, (ROWS - 1) * COLS, ROWS * COLS - 1];
+    for (const c of corners) {
+      for (let l = 0; l < TER_SKIRT_LEVELS.length; l++) {
+        const dup: number[] = [];
+        for (let i = 0; i < skirt.src.length; i++) {
+          if (skirt.src[i] === c && skirt.level[i] === l) dup.push(SURF + i);
+        }
+        expect(dup.length, `corner ${c} level ${l}`).toBe(2);
+        // Both walls push the corner along the same shared outward direction
+        // (`perimeterOutward`'s corner rule), so the two copies coincide
+        // exactly and the bevelled seam cannot tear open.
+        expect(pos.getX(dup[0])).toBe(pos.getX(dup[1]));
+        expect(pos.getY(dup[0])).toBe(pos.getY(dup[1]));
+        expect(pos.getZ(dup[0])).toBe(pos.getZ(dup[1]));
+      }
+    }
+  });
+
+  it('winds every band to face outward, so backface culling hides them from inside', () => {
+    const skirt = terrainSkirt(ROWS, COLS);
+    const { mesh } = builtTerrain();
+    const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
+    const posArr = pos.array as Float32Array;
+    const at = (i: number) => new THREE.Vector3(pos.getX(i), pos.getY(i), pos.getZ(i));
+    const out = { x: 0, z: 0 };
+    for (let t = 0; t < skirt.indices.length; t += 3) {
+      const v0 = at(skirt.indices[t]);
+      const v1 = at(skirt.indices[t + 1]);
+      const v2 = at(skirt.indices[t + 2]);
+      // Front-face normal of the triangle as three.js sees it (CCW winding).
+      const n = v1.sub(v0).cross(v2.sub(v0));
+      expect(n.lengthSq()).toBeGreaterThan(0);
+      n.normalize();
+      // The bevel lets a band lean back like a shoulder but never overhang —
+      // no face may point downward...
+      expect(n.y, `overhanging band at triangle ${t / 3}`).toBeGreaterThan(-1e-6);
+      // ...and every band's horizontal facing points away from the ribbon:
+      // against the summed outward directions of the vertices it hangs from.
+      let ox = 0;
+      let oz = 0;
+      for (let e = 0; e < 3; e++) {
+        perimeterOutward(posArr, ROWS, COLS, skirt.src[skirt.indices[t + e] - SURF], out);
+        ox += out.x;
+        oz += out.z;
+      }
+      expect(n.x * ox + n.z * oz, `inward-facing band at triangle ${t / 3}`).toBeGreaterThan(0);
+    }
+  });
+
+  it('copies each level normal from the ground it hangs from', () => {
+    // Verified live: true outward wall normals buy nothing at midday and risk
+    // dark cliff faces at other sun angles, so every level keeps the source
+    // boundary vertex's own computed surface normal.
+    const skirt = terrainSkirt(ROWS, COLS);
+    const { mesh } = builtTerrain();
+    const nrm = mesh.geometry.attributes.normal as THREE.BufferAttribute;
+    for (let i = 0; i < skirt.src.length; i++) {
+      const a = skirt.src[i];
+      const b = SURF + i;
+      expect(nrm.getX(b)).toBe(nrm.getX(a));
+      expect(nrm.getY(b)).toBe(nrm.getY(a));
+      expect(nrm.getZ(b)).toBe(nrm.getZ(a));
+    }
+  });
+
+  it('paints each level with the depth ramp and the surface noise idiom', () => {
+    const skirt = terrainSkirt(ROWS, COLS);
+    const { mesh, origin } = builtTerrain();
+    const pos = mesh.geometry.attributes.position as THREE.BufferAttribute;
+    const col = mesh.geometry.attributes.color as THREE.BufferAttribute;
+    let distinctFromSource = 0;
+    for (let i = 0; i < skirt.src.length; i++) {
+      const a = skirt.src[i];
+      const b = SURF + i;
+      const l = skirt.level[i];
+      // Source boundary tone through the level's shade, wobbled by the
+      // terrain's own noise keyed on world position and drop — baked and
+      // seamless across wall joins and chunk seams.
+      const wobble =
+        1 +
+        noise2(
+          (pos.getX(b) + origin.x) * 0.02,
+          (pos.getZ(b) + origin.z) * 0.02 + TER_SKIRT_LEVELS[l] * 0.13,
+        ) *
+          0.07;
+      const shade = TER_SKIRT_SHADE[l] * wobble;
+      expect(col.getX(b)).toBeCloseTo(col.getX(a) * shade, 5);
+      expect(col.getY(b)).toBeCloseTo(col.getY(a) * shade, 5);
+      expect(col.getZ(b)).toBeCloseTo(col.getZ(a) * shade, 5);
+      if (Math.abs(col.getX(b) - col.getX(a)) > 1e-4) distinctFromSource++;
+    }
+    // The wall actually carries paint: most vertices differ from their source
+    // tone, which is what a single 180 m quad could never show.
+    expect(distinctFromSource).toBeGreaterThan(skirt.src.length / 2);
+  });
+
+  it('leaves the surface normals exactly what the grid alone computes', () => {
+    // The skirt duplicates its tops rather than sharing them precisely so the
+    // walls cannot tilt boundary normals and stamp a toon band across every
+    // internal chunk seam. Rebuild the surface prefix alone and compare.
+    const { mesh } = builtTerrain();
+    const geo = mesh.geometry;
+    const pos = geo.attributes.position as THREE.BufferAttribute;
+    const idx = geo.index as THREE.BufferAttribute;
+    const ref = new THREE.BufferGeometry();
+    ref.setAttribute(
+      'position',
+      new THREE.BufferAttribute((pos.array as Float32Array).slice(0, SURF * 3), 3),
+    );
+    ref.setIndex(new THREE.BufferAttribute((idx.array as Uint32Array).slice(0, GRID_IDX), 1));
+    ref.computeVertexNormals();
+    const got = geo.attributes.normal as THREE.BufferAttribute;
+    const want = ref.attributes.normal as THREE.BufferAttribute;
+    for (let v = 0; v < SURF; v++) {
+      expect(got.getX(v)).toBeCloseTo(want.getX(v), 6);
+      expect(got.getY(v)).toBeCloseTo(want.getY(v), 6);
+      expect(got.getZ(v)).toBeCloseTo(want.getZ(v), 6);
+    }
+  });
+});
+
+/**
+ * The geography that makes the skirt necessary, and the closure it buys —
+ * offline, on the shipping seed, as issue #88 asks. `RoadPath` doubles back
+ * on itself constantly, so a ribbon edge many chunks away along the arc is
+ * routinely a few hundred metres from the eye in a straight line, barely
+ * hazed, and elevated by road drift plus the far-field rise.
+ */
+describe('close-lobe skirt closure (issue #88)', () => {
+  const SEED = 20260824;
+
+  interface Pt {
+    s: number;
+    x: number;
+    z: number;
+  }
+
+  /** Road samples every `step` m over `span`, hashed into `cell`-metre bins. */
+  function hashRoad(
+    path: RoadPath,
+    span: number,
+    step: number,
+    cell: number,
+  ): { pts: Pt[]; grid: Map<string, number[]> } {
+    const pts: Pt[] = [];
+    for (let s = 0; s <= span; s += step) {
+      const p = path.pose(s).pos;
+      pts.push({ s, x: p.x, z: p.z });
+    }
+    const grid = new Map<string, number[]>();
+    pts.forEach((p, i) => {
+      const key = `${Math.floor(p.x / cell)},${Math.floor(p.z / cell)}`;
+      let bin = grid.get(key);
+      if (!bin) grid.set(key, (bin = []));
+      bin.push(i);
+    });
+    return { pts, grid };
+  }
+
+  /** All index pairs with arc separation > minArc and euclid < the hash cell. */
+  function closePairs(pts: Pt[], grid: Map<string, number[]>, cell: number, minArc: number) {
+    const pairs: { i: number; j: number; d: number }[] = [];
+    for (let i = 0; i < pts.length; i++) {
+      const p = pts[i];
+      const cx = Math.floor(p.x / cell);
+      const cz = Math.floor(p.z / cell);
+      for (let ox = -1; ox <= 1; ox++) {
+        for (let oz = -1; oz <= 1; oz++) {
+          const bin = grid.get(`${cx + ox},${cz + oz}`);
+          if (!bin) continue;
+          for (const j of bin) {
+            if (j <= i || pts[j].s - p.s <= minArc) continue;
+            const d = Math.hypot(pts[j].x - p.x, pts[j].z - p.z);
+            if (d < cell) pairs.push({ i, j, d });
+          }
+        }
+      }
+    }
+    return pairs;
+  }
+
+  it('the road doubles back into close lobes, and the skirt closes every one', () => {
+    const path = new RoadPath(SEED);
+    const CELL = 600;
+    const { pts, grid } = hashRoad(path, 60_000, 20, CELL);
+    // The defect's geography: pairs far apart along the arc (well past a
+    // ribbon-boundary's worth) yet near enough in a straight line to be seen
+    // across the gap before the haze takes them.
+    const pairs = closePairs(pts, grid, CELL, 800);
+    expect(pairs.length).toBeGreaterThan(10_000);
+
+    // Closure: from a viewer on the road at s1, the facing ribbon edge at s2
+    // now carries a wall whose bottom lands below the viewer's own ground —
+    // so no sky or backdrop can show directly beneath the terrain edge.
+    const stride = Math.max(1, Math.floor(pairs.length / 600));
+    let checked = 0;
+    for (let k = 0; k < pairs.length; k += stride) {
+      const { i, j } = pairs[k];
+      const viewerGround = terrainHeight(path, pts[i].s, 0);
+      for (const edge of [TER_COLS[0], TER_COLS[TER_COLS.length - 1]]) {
+        const bottom = terrainHeight(path, pts[j].s, edge) - TER_SKIRT_DROP;
+        expect(
+          bottom,
+          `open edge: viewer s=${pts[i].s}, lobe s=${pts[j].s}, lat=${edge}`,
+        ).toBeLessThan(viewerGround);
+      }
+      checked++;
+    }
+    expect(checked).toBeGreaterThan(400);
+  });
+
+  it('drops past the sum of road drift, land relief and the viewer dip', () => {
+    // The three components TER_SKIRT_DROP is sized against, re-measured, so a
+    // retune of the road slope or the land relief forces the constant along.
+    const path = new RoadPath(SEED);
+
+    // 1. Road-elevation gain across euclid-visible gap pairs. Wider net than
+    // the defect geography on purpose (arc > 250 m — any mesh-boundary's
+    // worth — euclid < 1000 m — anything not yet fully hazed).
+    const CELL = 1000;
+    const { pts, grid } = hashRoad(path, 200_000, 20, CELL);
+    const elev = (s: number) => path.elevation(s);
+    let maxGain = 0;
+    for (const { i, j } of closePairs(pts, grid, CELL, 250)) {
+      maxGain = Math.max(maxGain, Math.abs(elev(pts[j].s) - elev(pts[i].s)));
+    }
+
+    // 2 & 3. Land relief above the local road (the edge the viewer sees) and
+    // below it (the ground a menu-legal eye can stand on).
+    let maxRelief = 0;
+    let maxDip = 0;
+    for (let s = 0; s <= 100_000; s += 37) {
+      const roadY = elev(s);
+      for (let lat = TER_COLS[0]; lat <= TER_COLS[TER_COLS.length - 1]; lat += 7.5) {
+        const rel = terrainHeight(path, s, lat) - roadY;
+        if (rel > maxRelief) maxRelief = rel;
+        if (-rel > maxDip) maxDip = -rel;
+      }
+    }
+
+    // Sanity: the sweep saw the real geography, not a truncated path.
+    // (Measured on the shipping seed: gain 125.3, relief 33.4, dip 14.8.)
+    expect(maxGain).toBeGreaterThan(100);
+    expect(maxRelief).toBeGreaterThan(20);
+    expect(maxDip).toBeGreaterThan(5);
+    // The guarantee, with explicit margin: a skirt bottom hangs below any
+    // ground a menu-legal eye can stand on, whatever gap it is seen across.
+    expect(TER_SKIRT_DROP).toBeGreaterThan(maxGain + maxRelief + maxDip + 2);
   });
 });
 

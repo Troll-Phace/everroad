@@ -1,6 +1,11 @@
 # Handoff — floating terrain in attract mode
 
-**Status:** open, reproducible by eye, **not** reproducible by any instrument I built.
+**Status:** RESOLVED — hypothesis A confirmed (offline pair-walk + live repro) and fixed
+by the terrain perimeter skirt on branch fix/floating-terrain-ribbon-skirt (issue #88).
+The ribbon's open cut edges — lateral ±165 m and the s-ends — were the floating band;
+they are now closed by a bevelled, depth-shaded wall dropping `TER_SKIRT_DROP` below
+the surface (src/world/chunks.ts, ARCHITECTURE.md §5.3). §3 (instrumentation) and §6
+(verification rules) remain worth reading for any future work in this area.
 **Build:** confirmed present on `fcb4e5d` (PR #87, merged 2026-08-25). Confirmed by the
 reporter after a hard reload, on the build badge reading `fcb4e5d`.
 **Written by:** the session that shipped PR #87, immediately after it failed to fix this.
