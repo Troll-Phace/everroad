@@ -146,13 +146,20 @@ runs would otherwise race to create the same release.
 gh release view v0.1.18
 ```
 
-These are the files a user downloads:
+These are the files a user downloads. Note the **lowercase `r`**: the on-disk
+name comes from `productName` in electron-builder.yml, which is deliberately
+`Everroad`, not the `EverRoad` wordmark. `productName` also decides the Electron
+`userData` directory, so recapitalising it would strand every existing desktop
+save under the old path — see the comment on it in electron-builder.yml. The
+same applies to `Everroad.app` and to the Gatekeeper messages further down,
+which quote the bundle name. Prose calls the game EverRoad; anything a
+filesystem sees is `Everroad`.
 
 | Platform | Assets |
 |----------|--------|
-| macOS | `EverRoad-0.1.18-mac-arm64.dmg`, `-mac-x64.dmg`, and a `.zip` of each |
-| Windows | `EverRoad-0.1.18-win-x64-setup.exe` (NSIS installer) and `-win-x64-portable.exe` |
-| Linux | `EverRoad-0.1.18-linux-x86_64.AppImage` and `EverRoad-0.1.18-linux-x86_64.rpm` |
+| macOS | `Everroad-0.1.18-mac-arm64.dmg`, `-mac-x64.dmg`, and a `.zip` of each |
+| Windows | `Everroad-0.1.18-win-x64-setup.exe` (NSIS installer) and `-win-x64-portable.exe` |
+| Linux | `Everroad-0.1.18-linux-x86_64.AppImage` and `Everroad-0.1.18-linux-x86_64.rpm` |
 
 The two Windows names must stay distinct. Both targets emit an `.exe` for the
 same os/arch, so they shared one filename under the global `artifactName` until
@@ -271,14 +278,14 @@ an unsigned app from the internet as suspicious. This is expected, it is not a
 bug in the build, and it needs saying plainly on the download page.
 
 **macOS.** The `.app` carries a quarantine flag after download. Gatekeeper
-refuses the first launch with *"EverRoad" cannot be opened because the developer
+refuses the first launch with *"Everroad" cannot be opened because the developer
 cannot be verified* — or, on recent macOS, the more alarming and quite
-misleading *"EverRoad" is damaged and can't be opened*. The app is not damaged;
+misleading *"Everroad" is damaged and can't be opened*. The app is not damaged;
 it is unsigned. The user opens it once via **right-click → Open → Open**, or
 clears the flag directly:
 
 ```bash
-xattr -dr com.apple.quarantine /Applications/EverRoad.app
+xattr -dr com.apple.quarantine /Applications/Everroad.app
 ```
 
 After the first successful open, macOS remembers and launches it normally.
@@ -290,14 +297,14 @@ count grows, but for a new release it will always appear at first.
 **Linux.** The AppImage needs the executable bit, which some browsers strip:
 
 ```bash
-chmod +x EverRoad-0.1.18-linux-x86_64.AppImage
-./EverRoad-0.1.18-linux-x86_64.AppImage
+chmod +x Everroad-0.1.18-linux-x86_64.AppImage
+./Everroad-0.1.18-linux-x86_64.AppImage
 ```
 
 On Fedora or RHEL, install the RPM instead:
 
 ```bash
-sudo dnf install ./EverRoad-0.1.18-linux-x86_64.rpm
+sudo dnf install ./Everroad-0.1.18-linux-x86_64.rpm
 ```
 
 The RPM is unsigned, so `dnf` will ask to confirm an untrusted package. Building
