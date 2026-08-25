@@ -448,6 +448,28 @@ describe('the ribbon\u2019s rear boundary', () => {
   const SAMPLE_STRIDE = 5;
 
   /**
+   * Timeout for the two tests that run a sweep, in ms.
+   *
+   * These are not slow by accident. `measureCutExposure` marches an occlusion
+   * ray for one framed sample in every `SAMPLE_STRIDE` across three start
+   * positions and every shot -- at `MENU_BEHIND` that is ~52k framed samples --
+   * because the version of this test that *was* fast got its answer by
+   * short-circuiting the occlusion check and so measured nothing (see the
+   * `MENU_BEHIND` docblock). The work is the point.
+   *
+   * Vitest's 5 s default is not enough headroom for that: the sweep measures
+   * ~2.9 s on a warm dev machine and timed out at 5623 ms on a loaded CI runner
+   * (run 32801098859), having passed on the same tree minutes earlier. That is
+   * a flaky test, not a slow one, and the honest fix is to state the budget
+   * rather than to thin the sweep until it fits a default that was never
+   * chosen with this in mind.
+   *
+   * If this ever genuinely needs 60 s, the sweep has grown a real problem and
+   * raising the number again is the wrong response.
+   */
+  const SWEEP_TIMEOUT_MS = 60_000;
+
+  /**
    * How far the nearest *unoccluded* point of the rear cut has to sit from the
    * eye, in metres, for the menu tail to count as hiding it. See the test that
    * asserts it for where the number comes from and what it does not claim.
@@ -579,13 +601,17 @@ describe('the ribbon\u2019s rear boundary', () => {
    * that case vacuous, which is how the first version of this pair passed while
    * the shipped tail left the cut on screen.
    */
-  it('was in view, and close, at the driving tail', () => {
-    const { tested, seen, nearest } = cutExposure(PLAY_BEHIND);
-    expect(seen).toBeGreaterThan(0);
-    expect(seen / tested).toBeGreaterThan(0.5);
-    expect(nearest).toBeLessThan(400);
-    expect(nearest).toBeLessThan(CUT_MIN_DISTANCE);
-  });
+  it(
+    'was in view, and close, at the driving tail',
+    () => {
+      const { tested, seen, nearest } = cutExposure(PLAY_BEHIND);
+      expect(seen).toBeGreaterThan(0);
+      expect(seen / tested).toBeGreaterThan(0.5);
+      expect(nearest).toBeLessThan(400);
+      expect(nearest).toBeLessThan(CUT_MIN_DISTANCE);
+    },
+    SWEEP_TIMEOUT_MS,
+  );
 
   /**
    * And with the menu's tail, whatever is still exposed is far away.
@@ -618,14 +644,18 @@ describe('the ribbon\u2019s rear boundary', () => {
    * What picks 22 out of 14..22 is the design argument in `MENU_BEHIND`'s
    * docblock, not this sweep.
    */
-  it('keeps the cut at least CUT_MIN_DISTANCE away at the menu tail', () => {
-    const { framed, nearest } = cutExposure(MENU_BEHIND);
-    // The sweep has to have had the chance: a tail nothing frames would make
-    // the distance below vacuous — that is how the first version of this pair
-    // passed while the shipped tail left the cut on screen.
-    expect(framed).toBeGreaterThan(1000);
-    expect(nearest).toBeGreaterThanOrEqual(CUT_MIN_DISTANCE);
-  });
+  it(
+    'keeps the cut at least CUT_MIN_DISTANCE away at the menu tail',
+    () => {
+      const { framed, nearest } = cutExposure(MENU_BEHIND);
+      // The sweep has to have had the chance: a tail nothing frames would make
+      // the distance below vacuous — that is how the first version of this pair
+      // passed while the shipped tail left the cut on screen.
+      expect(framed).toBeGreaterThan(1000);
+      expect(nearest).toBeGreaterThanOrEqual(CUT_MIN_DISTANCE);
+    },
+    SWEEP_TIMEOUT_MS,
+  );
 
   /**
    * `roadsideStatic` is the shot that reaches furthest forward, and its lead
